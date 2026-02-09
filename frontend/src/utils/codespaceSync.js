@@ -396,6 +396,23 @@ export async function pushScriptsToCodespace(baseUrl, rootHandle) {
 }
 
 /**
+ * Reset codespace to latest dev-branch (git reset --hard && git pull)
+ */
+export async function resetCodespace(baseUrl) {
+  const response = await fetch(`${baseUrl}/reset`, {
+    method: "POST",
+    mode: "cors"
+  })
+
+  if (!response.ok) {
+    const data = await response.json()
+    throw new Error(data.message || "Failed to reset codespace")
+  }
+
+  return response.json()
+}
+
+/**
  * Run full bidirectional sync
  */
 export async function runFullSync(baseUrl, rootHandle, lastSync = {}) {

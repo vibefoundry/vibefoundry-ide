@@ -2052,6 +2052,17 @@ body {
 .btn-small {
   flex: 1;
 }
+
+.btn-warning {
+  background: #f59e0b !important;
+  color: white !important;
+  border-color: #d97706 !important;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #d97706 !important;
+}
+
 /* btn-small, btn-danger, btn-sync base styles defined in standardized button base above */
 
 .sync-status-row {

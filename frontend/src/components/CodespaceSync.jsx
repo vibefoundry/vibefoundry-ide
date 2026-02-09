@@ -17,7 +17,8 @@ import {
   checkSyncServer,
   runFullSync,
   pushScriptsToCodespace,
-  writeTimeKeeper
+  writeTimeKeeper,
+  resetCodespace
 } from '../utils/codespaceSync'
 
 function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection }) {
@@ -36,6 +37,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
   const [isCreatingCodespace, setIsCreatingCodespace] = useState(false)
   const [isLaunchingCodespace, setIsLaunchingCodespace] = useState(false)
   const [isDeletingCodespace, setIsDeletingCodespace] = useState(false)
+  const [isResettingCodespace, setIsResettingCodespace] = useState(false)
 
   // Sync state - initialize from currentConnection if provided
   const [syncUrl, setSyncUrl] = useState(currentConnection?.syncUrl || null)
@@ -399,6 +401,27 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     }
   }
 
+  const handleResetCodespace = async () => {
+    if (!syncUrl || !isConnected) return
+    if (!confirm('Reset codespace to latest dev-branch? This will discard all local changes in the codespace.')) return
+    setIsResettingCodespace(true)
+    setSyncMessage('Resetting codespace...')
+    setSyncStatus('syncing')
+    try {
+      const result = await resetCodespace(syncUrl)
+      setSyncMessage('Codespace reset to latest dev-branch')
+      setSyncStatus('success')
+      // Clear sync state to force fresh sync
+      lastSyncRef.current = {}
+      setLastSync({})
+    } catch (err) {
+      setSyncMessage('Failed to reset: ' + err.message)
+      setSyncStatus('error')
+    } finally {
+      setIsResettingCodespace(false)
+    }
+  }
+
   const handleSync = useCallback(async () => {
     if (!syncUrl || !projectPath || isSyncing) return
 
@@ -659,6 +682,13 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
                 disabled={isPushing}
               >
                 {isPushing ? 'Pushing...' : 'Push Scripts'}
+              </button>
+              <button
+                className="btn-small btn-warning"
+                onClick={handleResetCodespace}
+                disabled={isResettingCodespace}
+              >
+                {isResettingCodespace ? 'Resetting...' : 'Reset Codespace'}
               </button>
             </div>
           )}
