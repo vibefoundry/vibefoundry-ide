@@ -4,6 +4,7 @@ FastAPI backend server for VibeFoundry IDE
 
 import os
 import sys
+import json
 import asyncio
 import struct
 import signal
@@ -24,7 +25,8 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import polars as pl
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,14 +45,14 @@ class AppState:
 
 
 class DataFrameState:
-    """Holds the currently viewed DataFrame in memory"""
+    """Holds the currently viewed DataFrame in memory (using Polars for speed)"""
     def __init__(self):
-        self.df = None  # pandas DataFrame
+        self.df: Optional[pl.DataFrame] = None  # Polars DataFrame
         self.file_path: Optional[str] = None
         self.column_info: dict = {}  # {col: {type, min, max, values}}
         self.current_filters: dict = {}
         self.current_sort: Optional[tuple] = None  # (column, direction)
-        self._filtered_df = None  # Cached filtered/sorted DataFrame
+        self._filtered_df: Optional[pl.DataFrame] = None  # Cached filtered/sorted DataFrame
 
     def clear(self):
         """Clear the DataFrame from memory"""
@@ -61,7 +63,7 @@ class DataFrameState:
         self.current_sort = None
         self._filtered_df = None
 
-    def get_processed_df(self):
+    def get_processed_df(self) -> Optional[pl.DataFrame]:
         """Get the filtered/sorted DataFrame, using cache if available"""
         if self.df is None:
             return None
@@ -168,11 +170,12 @@ async def select_folder(request: FolderSelectRequest):
         state.watcher.stop()
 
     # Start new watcher
+    # Note: Pass coroutines directly - watcher.py handles thread-safe scheduling
     state.watcher = FileWatcher(
         folder_path,
-        on_data_change=lambda: asyncio.create_task(notify_data_change()),
-        on_script_change=lambda p: asyncio.create_task(notify_script_change(p)),
-        on_output_file_change=lambda p, t: asyncio.create_task(notify_output_file_change(p, t))
+        on_data_change=notify_data_change,
+        on_script_change=notify_script_change,
+        on_output_file_change=notify_output_file_change
     )
     await state.watcher.start_async()
 
@@ -431,33 +434,72 @@ async def read_file(path: str):
     dataframe_extensions = {'.csv', '.xlsx', '.xls'}
 
     if ext in dataframe_extensions:
-        # Parse as dataframe, compute metadata, return first chunk
+        # Parse as dataframe using Polars (much faster than pandas)
         try:
             if ext == '.csv':
-                df = pd.read_csv(file_path)
+                # Read raw bytes to detect line endings and separator
+                with open(file_path, 'rb') as f:
+                    sample = f.read(4096)
+
+                # Detect line ending style
+                has_crlf = b'\r\n' in sample
+                has_lf = b'\n' in sample
+                has_cr = b'\r' in sample
+
+                # Detect separator from first line
+                if has_crlf:
+                    first_line = sample.split(b'\r\n')[0].decode('utf-8', errors='ignore')
+                elif has_lf:
+                    first_line = sample.split(b'\n')[0].decode('utf-8', errors='ignore')
+                elif has_cr:
+                    first_line = sample.split(b'\r')[0].decode('utf-8', errors='ignore')
+                else:
+                    first_line = sample.decode('utf-8', errors='ignore')
+
+                # Detect separator
+                if '\t' in first_line:
+                    separator = '\t'
+                elif ';' in first_line:
+                    separator = ';'
+                else:
+                    separator = ','
+
+                # Handle old Mac CR-only line endings by converting to LF
+                if has_cr and not has_lf and not has_crlf:
+                    with open(file_path, 'rb') as f:
+                        content = f.read()
+                    content = content.replace(b'\r', b'\n')
+                    import io
+                    df = pl.read_csv(io.BytesIO(content), separator=separator, has_header=True, infer_schema_length=10000, truncate_ragged_lines=True)
+                else:
+                    df = pl.read_csv(file_path, separator=separator, has_header=True, infer_schema_length=10000, truncate_ragged_lines=True)
             else:
-                df = pd.read_excel(file_path)
+                # Polars reads Excel via xlsx2csv or calamine
+                df = pl.read_excel(file_path)
 
             # Store in global state (clear previous)
             df_state.clear()
-            df_state.df = df.fillna('')
+            df_state.df = df
             df_state.file_path = path
 
-            # Compute column metadata using pandas
+            # Compute column metadata using Polars
             column_info = {}
             for col in df.columns:
-                series = df[col]
+                dtype = df[col].dtype
                 # Check if numeric
-                if pd.api.types.is_numeric_dtype(series):
-                    numeric_vals = series.dropna()
-                    column_info[col] = {
-                        "type": "numeric",
-                        "min": float(numeric_vals.min()) if len(numeric_vals) > 0 else 0,
-                        "max": float(numeric_vals.max()) if len(numeric_vals) > 0 else 0
-                    }
+                if dtype.is_numeric():
+                    col_data = df[col].drop_nulls()
+                    if len(col_data) > 0:
+                        column_info[col] = {
+                            "type": "numeric",
+                            "min": float(col_data.min()),
+                            "max": float(col_data.max())
+                        }
+                    else:
+                        column_info[col] = {"type": "numeric", "min": 0, "max": 0}
                 else:
                     # Categorical - get unique values
-                    unique_vals = series.dropna().unique().tolist()[:500]
+                    unique_vals = df[col].drop_nulls().unique().head(500).to_list()
                     # Convert to strings for JSON serialization
                     unique_vals = [str(v) for v in unique_vals if v != '']
                     column_info[col] = {
@@ -467,10 +509,17 @@ async def read_file(path: str):
 
             df_state.column_info = column_info
 
-            # Return first 200 rows
+            # Return first 200 rows - convert nulls to empty string for JSON
             CHUNK_SIZE = 200
-            columns = df_state.df.columns.tolist()
-            first_chunk = df_state.df.head(CHUNK_SIZE).to_dict(orient='records')
+            columns = list(df_state.df.columns)
+            # Use write_json for proper null handling, then parse back
+            chunk_df = df_state.df.head(CHUNK_SIZE)
+            first_chunk = chunk_df.to_dicts()
+            # Replace None with empty string in the dicts
+            for row in first_chunk:
+                for key in row:
+                    if row[key] is None:
+                        row[key] = ''
 
             return {
                 "type": "dataframe",
@@ -478,7 +527,7 @@ async def read_file(path: str):
                 "columns": columns,
                 "columnInfo": column_info,
                 "data": first_chunk,
-                "totalRows": len(df_state.df),
+                "totalRows": df_state.df.height,
                 "offset": 0,
                 "limit": CHUNK_SIZE,
                 "filename": file_path.name
@@ -527,6 +576,35 @@ async def write_file(request: WriteFileRequest):
     return {"success": True, "path": request.path}
 
 
+@app.post("/api/files/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    folder: str = Form(...)
+):
+    """Upload a binary file to a folder"""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    # Build target path
+    target_folder = state.project_folder / folder
+    target_path = target_folder / file.filename
+
+    # Security check - ensure path is within project folder
+    try:
+        target_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Create parent directories if needed
+    target_folder.mkdir(parents=True, exist_ok=True)
+
+    # Write file content
+    content = await file.read()
+    target_path.write_bytes(content)
+
+    return {"success": True, "path": f"{folder}/{file.filename}"}
+
+
 class DeleteFileRequest(BaseModel):
     path: str
     isDirectory: bool = False
@@ -572,9 +650,7 @@ async def get_dataframe_rows(
     offset: int = 0,
     limit: int = 200
 ):
-    """Get paginated rows from the cached DataFrame"""
-    import pandas as pd
-
+    """Get paginated rows from the cached DataFrame (using Polars)"""
     if df_state.df is None or df_state.file_path != filePath:
         raise HTTPException(status_code=400, detail="DataFrame not loaded. Read the file first.")
 
@@ -583,29 +659,33 @@ async def get_dataframe_rows(
     if df is None:
         raise HTTPException(status_code=400, detail="DataFrame not available")
 
-    # Slice the requested rows
-    chunk = df.iloc[offset:offset + limit].to_dict(orient='records')
+    # Slice the requested rows using Polars
+    chunk = df.slice(offset, limit).to_dicts()
+    # Replace None with empty string for JSON
+    for row in chunk:
+        for key in row:
+            if row[key] is None:
+                row[key] = ''
 
     return {
         "data": chunk,
         "offset": offset,
         "limit": limit,
-        "totalRows": len(df)
+        "totalRows": df.height
     }
 
 
 @app.post("/api/dataframe/query")
 async def query_dataframe(request: DataFrameQueryRequest):
-    """Apply filters and/or sort to the DataFrame, return first chunk"""
-    import pandas as pd
-
+    """Apply filters and/or sort to the DataFrame using Polars (fast)"""
     if df_state.df is None or df_state.file_path != request.filePath:
         raise HTTPException(status_code=400, detail="DataFrame not loaded. Read the file first.")
 
     # Start with the original DataFrame
-    df = df_state.df.copy()
+    df = df_state.df
 
-    # Apply filters
+    # Build filter expressions
+    filter_exprs = []
     for column, filter_val in request.filters.items():
         if column not in df.columns:
             continue
@@ -615,30 +695,33 @@ async def query_dataframe(request: DataFrameQueryRequest):
             if filter_val.get('min') not in (None, '', 'null'):
                 try:
                     min_val = float(filter_val['min'])
-                    df = df[pd.to_numeric(df[column], errors='coerce') >= min_val]
+                    filter_exprs.append(pl.col(column).cast(pl.Float64, strict=False) >= min_val)
                 except (ValueError, TypeError):
                     pass
             if filter_val.get('max') not in (None, '', 'null'):
                 try:
                     max_val = float(filter_val['max'])
-                    df = df[pd.to_numeric(df[column], errors='coerce') <= max_val]
+                    filter_exprs.append(pl.col(column).cast(pl.Float64, strict=False) <= max_val)
                 except (ValueError, TypeError):
                     pass
         elif isinstance(filter_val, list) and len(filter_val) > 0:
             # Categorical filter - include rows matching any value
-            df = df[df[column].astype(str).isin([str(v) for v in filter_val])]
+            str_vals = [str(v) for v in filter_val]
+            filter_exprs.append(pl.col(column).cast(pl.Utf8).is_in(str_vals))
+
+    # Apply all filters at once (more efficient)
+    if filter_exprs:
+        combined_filter = filter_exprs[0]
+        for expr in filter_exprs[1:]:
+            combined_filter = combined_filter & expr
+        df = df.filter(combined_filter)
 
     # Apply sort
     if request.sort and request.sort.get('column'):
         sort_col = request.sort['column']
-        ascending = request.sort.get('direction', 'asc') == 'asc'
+        descending = request.sort.get('direction', 'asc') != 'asc'
         if sort_col in df.columns:
-            # Try numeric sort first, fall back to string sort
-            try:
-                df = df.sort_values(by=sort_col, ascending=ascending, na_position='last')
-            except TypeError:
-                df[sort_col] = df[sort_col].astype(str)
-                df = df.sort_values(by=sort_col, ascending=ascending, na_position='last')
+            df = df.sort(sort_col, descending=descending, nulls_last=True)
 
     # Cache the processed DataFrame
     df_state._filtered_df = df
@@ -647,11 +730,16 @@ async def query_dataframe(request: DataFrameQueryRequest):
 
     # Return first chunk
     CHUNK_SIZE = 200
-    first_chunk = df.head(CHUNK_SIZE).to_dict(orient='records')
+    first_chunk = df.head(CHUNK_SIZE).to_dicts()
+    # Replace None with empty string for JSON
+    for row in first_chunk:
+        for key in row:
+            if row[key] is None:
+                row[key] = ''
 
     return {
         "data": first_chunk,
-        "totalRows": len(df),
+        "totalRows": df.height,
         "offset": 0,
         "limit": CHUNK_SIZE,
         "appliedFilters": request.filters,
@@ -868,40 +956,60 @@ class TokenPollRequest(BaseModel):
 @app.post("/api/github/device-code")
 async def github_device_code(request: DeviceCodeRequest):
     """Initiate GitHub device flow authentication"""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://github.com/login/device/code",
-            data={
-                "client_id": request.client_id,
-                "scope": request.scope,
-            },
-            headers={"Accept": "application/json"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://github.com/login/device/code",
+                data={
+                    "client_id": request.client_id,
+                    "scope": request.scope,
+                },
+                headers={"Accept": "application/json"},
+            )
 
-        return JSONResponse(
-            status_code=response.status_code if response.is_success else response.status_code,
-            content=response.json()
-        )
+            if not response.content:
+                return JSONResponse(status_code=502, content={"error": "Empty response from GitHub"})
+
+            try:
+                data = response.json()
+            except Exception:
+                return JSONResponse(status_code=502, content={"error": f"Invalid response from GitHub"})
+
+            return JSONResponse(status_code=response.status_code, content=data)
+    except httpx.TimeoutException:
+        return JSONResponse(status_code=504, content={"error": "GitHub request timed out"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to connect to GitHub: {str(e)}"})
 
 
 @app.post("/api/github/token")
 async def github_token(request: TokenPollRequest):
     """Poll for GitHub access token"""
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://github.com/login/oauth/access_token",
-            data={
-                "client_id": request.client_id,
-                "device_code": request.device_code,
-                "grant_type": request.grant_type,
-            },
-            headers={"Accept": "application/json"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://github.com/login/oauth/access_token",
+                data={
+                    "client_id": request.client_id,
+                    "device_code": request.device_code,
+                    "grant_type": request.grant_type,
+                },
+                headers={"Accept": "application/json"},
+            )
 
-        return JSONResponse(
-            status_code=200,
-            content=response.json()
-        )
+            if not response.content:
+                return JSONResponse(status_code=502, content={"error": "Empty response from GitHub"})
+
+            try:
+                data = response.json()
+            except Exception:
+                return JSONResponse(status_code=502, content={"error": "Invalid response from GitHub"})
+
+            return JSONResponse(status_code=200, content=data)
+    except httpx.TimeoutException:
+        return JSONResponse(status_code=504, content={"error": "GitHub request timed out"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to connect to GitHub: {str(e)}"})
 
 
 # WebSocket for real-time updates
@@ -950,7 +1058,18 @@ async def notify_data_change():
 
 async def notify_script_change(script_path: Path):
     """Notify all WebSocket clients of script change"""
-    message = f'{{"type": "script_change", "path": "{script_path}"}}'
+    # Convert to relative path with forward slashes (works on all platforms)
+    rel_path = script_path.name  # Just the filename
+    if state.project_folder:
+        try:
+            rel_path = str(script_path.relative_to(state.project_folder / "app_folder" / "scripts"))
+        except ValueError:
+            rel_path = script_path.name
+    # Use forward slashes for consistency
+    rel_path = rel_path.replace("\\", "/")
+
+    print(f"[Script Change] Notifying {len(state.websocket_clients)} clients: {rel_path}")
+    message = json.dumps({"type": "script_change", "path": rel_path})
     disconnected = []
 
     for client in state.websocket_clients:
@@ -972,8 +1091,11 @@ async def notify_output_file_change(file_path: Path, change_type: str):
             rel_path = str(file_path.relative_to(state.project_folder))
         except ValueError:
             pass
+    # Use forward slashes for consistency (Windows fix)
+    rel_path = rel_path.replace("\\", "/")
 
-    message = f'{{"type": "output_file_change", "path": "{rel_path}", "change_type": "{change_type}"}}'
+    print(f"[Output Change] Notifying {len(state.websocket_clients)} clients: {rel_path}")
+    message = json.dumps({"type": "output_file_change", "path": rel_path, "change_type": change_type})
     disconnected = []
 
     for client in state.websocket_clients:
@@ -1042,7 +1164,6 @@ async def websocket_terminal(websocket: WebSocket):
                     if data:
                         # Check for JSON commands
                         if data.startswith('{'):
-                            import json
                             try:
                                 msg = json.loads(data)
                                 if msg.get('type') == 'resize':

@@ -388,6 +388,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
       }
       // Open codespace in browser
       const codespaceUrl = `https://${selectedCodespace.name}.github.dev`
+      console.log('[CodespaceSync] Opening URL:', codespaceUrl)
+      console.log('[CodespaceSync] selectedCodespace:', selectedCodespace)
       window.open(codespaceUrl, '_blank')
 
       // Poll for codespace to be ready and sync server to respond
@@ -398,7 +400,6 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           return
         }
 
-        await loadCodespaces()
         const connected = await checkSyncServer(syncUrl)
 
         if (connected) {
@@ -406,6 +407,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           setIsLaunchingCodespace(false)
           setSyncMessage('Connected!')
           setSyncStatus('success')
+          loadCodespaces() // Refresh list only once connected
         } else {
           setTimeout(() => pollForReady(attempts + 1), 1000)
         }
@@ -440,7 +442,6 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           return
         }
 
-        await loadCodespaces()
         const connected = await checkSyncServer(syncUrl)
 
         if (connected) {
@@ -448,6 +449,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           setIsConnecting(false)
           setSyncMessage('Connected!')
           setSyncStatus('success')
+          // Refresh codespaces list once connected
+          loadCodespaces()
         } else {
           setSyncMessage(`Waiting for sync server... (${attempts}s)`)
           setTimeout(() => pollForReady(attempts + 1), 1000)

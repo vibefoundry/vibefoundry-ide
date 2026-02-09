@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 const FIXED_COLS = 80
-const FIXED_ROWS = 20
+const FIXED_ROWS = 6
 
 function LocalTerminal({ id, onClose }) {
   const terminalRef = useRef(null)
@@ -21,7 +20,7 @@ function LocalTerminal({ id, onClose }) {
       cursorStyle: 'block',
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 2000,
+      scrollback: 1000,
       cols: FIXED_COLS,
       rows: FIXED_ROWS,
       theme: {
@@ -49,15 +48,6 @@ function LocalTerminal({ id, onClose }) {
     })
 
     xterm.open(terminalRef.current)
-
-    // Load WebGL addon
-    try {
-      const webglAddon = new WebglAddon()
-      xterm.loadAddon(webglAddon)
-    } catch (e) {
-      console.warn('WebGL addon failed to load:', e)
-    }
-
     xtermRef.current = xterm
 
     // Connect WebSocket to local backend
