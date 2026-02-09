@@ -1,0 +1,6 @@
+Output Folder Metadata
+Folder: /Users/angelo/Documents/GitHub/vibefoundry-ide/output_folder
+Generated: 2026-02-09 06:03:49
+==================================================
+
+No data files found.

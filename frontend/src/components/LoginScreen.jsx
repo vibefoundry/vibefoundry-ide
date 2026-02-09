@@ -1,4 +1,12 @@
-function LoginScreen({ status, username }) {
+import { clearCredentials } from '../utils/github'
+
+function LoginScreen({ status, username, onLogout }) {
+  const handleLogout = () => {
+    clearCredentials()
+    if (onLogout) onLogout()
+    window.location.reload()
+  }
+
   // Checking access
   if (status === 'checking') {
     return (
@@ -20,6 +28,9 @@ function LoginScreen({ status, username }) {
           <h1>Access Pending</h1>
           <p>Hi <strong>{username}</strong>, your account is awaiting approval.</p>
           <p className="subtext">Contact the administrator to get access.</p>
+          <button onClick={handleLogout} className="btn btn-secondary" style={{ marginTop: 20 }}>
+            Logout / Use Different Account
+          </button>
         </div>
       </div>
     )
@@ -34,6 +45,9 @@ function LoginScreen({ status, username }) {
           <p>Could not connect to the authentication server.</p>
           <button onClick={() => window.location.reload()} className="btn btn-primary">
             Retry
+          </button>
+          <button onClick={handleLogout} className="btn btn-secondary" style={{ marginLeft: 10 }}>
+            Logout
           </button>
         </div>
       </div>
