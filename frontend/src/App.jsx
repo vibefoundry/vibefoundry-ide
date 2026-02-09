@@ -11,7 +11,8 @@ import {
   getExtension
 } from './utils/fileSystem'
 import { listAllFiles, getFile, syncScriptsToLocal, pushScriptsToCodespace } from './utils/codespaceSync'
-import { getStoredAuth, storeAuth, clearAuth, parseAuthFromUrl, validateAccess } from './utils/auth'
+import { getStoredUser } from './utils/github'
+import { validateAccess } from './utils/auth'
 import './App.css'
 
 function App() {
@@ -47,9 +48,9 @@ function App() {
   const [terminalWidth, setTerminalWidth] = useState(720)
   const [isResizingTerminal, setIsResizingTerminal] = useState(false)
 
-  // Auth state
+  // Auth state - uses existing GitHub auth from CodespaceSync
   const [authStatus, setAuthStatus] = useState('checking') // 'checking', 'not_logged_in', 'denied', 'allowed', 'error'
-  const [authUser, setAuthUser] = useState(null) // { github_token, github_id, github_username }
+  const [authUser, setAuthUser] = useState(null) // GitHub user from github.js
 
   const rootHandleRef = useRef(null)
   const mainContentRef = useRef(null)
@@ -153,33 +154,26 @@ function App() {
     document.addEventListener('mouseup', handleResizeEnd)
   }, [])
 
-  // Check auth on mount
+  // Check auth on mount - uses existing GitHub auth from github.js
   useEffect(() => {
     const checkAuth = async () => {
-      // First check URL params (OAuth redirect)
-      let auth = parseAuthFromUrl()
-      if (auth) {
-        storeAuth(auth.github_token, auth.github_id, auth.github_username)
-        setAuthUser(auth)
-      } else {
-        // Check localStorage
-        auth = getStoredAuth()
-        if (auth) {
-          setAuthUser(auth)
-        }
-      }
+      const user = getStoredUser()
 
-      if (!auth) {
+      if (!user) {
+        // Not logged in yet - let them proceed, they'll login via CodespaceSync
         setAuthStatus('not_logged_in')
         return
       }
 
+      setAuthUser(user)
+
       // Validate with backend
-      const result = await validateAccess(auth.github_id)
+      const result = await validateAccess(user.id, user.login)
       if (result.valid) {
         setAuthStatus('allowed')
-      } else if (result.reason === 'Could not connect to server') {
-        setAuthStatus('error')
+      } else if (result.reason === 'Could not connect to auth server') {
+        // Can't reach auth server - allow for now (offline mode)
+        setAuthStatus('allowed')
       } else {
         setAuthStatus('denied')
       }
@@ -188,11 +182,25 @@ function App() {
     checkAuth()
   }, [])
 
-  // Logout handler
-  const handleLogout = () => {
-    clearAuth()
-    setAuthUser(null)
-    setAuthStatus('not_logged_in')
+  // Re-check auth when user logs in via CodespaceSync
+  const handleAuthChange = async (user) => {
+    if (!user) {
+      setAuthUser(null)
+      setAuthStatus('not_logged_in')
+      return
+    }
+
+    setAuthUser(user)
+    setAuthStatus('checking')
+
+    const result = await validateAccess(user.id, user.login)
+    if (result.valid) {
+      setAuthStatus('allowed')
+    } else if (result.reason === 'Could not connect to auth server') {
+      setAuthStatus('allowed')
+    } else {
+      setAuthStatus('denied')
+    }
   }
 
   // Initialize script runner height to 1/4 of main content
@@ -681,13 +689,13 @@ function App() {
     }
   }
 
-  // Show login screen if not authenticated
-  if (authStatus !== 'allowed') {
+  // Show login screen for checking/denied/error states
+  // Allow 'not_logged_in' to see the app (they'll login via CodespaceSync)
+  if (authStatus === 'checking' || authStatus === 'denied' || authStatus === 'error') {
     return (
       <LoginScreen
         status={authStatus}
-        username={authUser?.github_username}
-        onLogout={handleLogout}
+        username={authUser?.login}
       />
     )
   }
@@ -956,6 +964,7 @@ function App() {
                     onConnectionChange={(conn) => {
                       setSyncConnection(conn)
                     }}
+                    onAuthChange={handleAuthChange}
                   />
                 </div>
               </div>

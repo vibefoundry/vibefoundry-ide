@@ -21,7 +21,7 @@ import {
   resetCodespace
 } from '../utils/codespaceSync'
 
-function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection }) {
+function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection, onAuthChange }) {
   // Auth state
   const [token, setToken] = useState(getStoredToken())
   const [user, setUser] = useState(getStoredUser())
@@ -213,6 +213,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
             setUser(userInfo)
             setDeviceCode(null)
             setIsLoggingIn(false)
+            // Notify parent of auth change for validation
+            if (onAuthChange) onAuthChange(userInfo)
           } else if (result.error === 'expired_token') {
             setLoginError('Code expired. Please try again.')
             setDeviceCode(null)
@@ -259,6 +261,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     setSyncUrl(null)
     setIsConnected(false)
     setDeviceCode(null)
+    // Notify parent of auth change
+    if (onAuthChange) onAuthChange(null)
   }
 
   const handleSelectCodespace = (codespace) => {
