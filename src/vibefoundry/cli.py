@@ -103,10 +103,17 @@ def main(args: Optional[list[str]] = None):
     # Find available port
     port = parsed_args.port or find_available_port()
     host = parsed_args.host
-    url = f"http://{host}:{port}"
+    local_url = f"http://{host}:{port}"
+
+    # Use hosted frontend by default, local only if --dev flag
+    if parsed_args.dev:
+        url = local_url
+    else:
+        url = f"https://vibefoundry.ai/app?port={port}"
 
     print(f"Starting VibeFoundry IDE v{__version__}")
-    print(f"Server: {url}")
+    print(f"Backend: {local_url}")
+    print(f"App: {url}")
 
     # Handle Ctrl+C gracefully
     shutdown_event = threading.Event()

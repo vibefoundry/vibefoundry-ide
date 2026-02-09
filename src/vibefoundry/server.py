@@ -3,14 +3,23 @@ FastAPI backend server for VibeFoundry IDE
 """
 
 import os
+import sys
 import asyncio
-import pty
-import fcntl
 import struct
-import termios
 import signal
-import select
 from pathlib import Path
+
+# Unix-only imports for terminal functionality
+if sys.platform != 'win32':
+    import pty
+    import fcntl
+    import termios
+    import select
+else:
+    pty = None
+    fcntl = None
+    termios = None
+    select = None
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -981,6 +990,8 @@ async def notify_output_file_change(file_path: Path, change_type: str):
 
 def set_terminal_size(fd, rows, cols):
     """Set terminal window size"""
+    if sys.platform == 'win32':
+        return  # Not supported on Windows
     winsize = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
@@ -989,6 +1000,12 @@ def set_terminal_size(fd, rows, cols):
 async def websocket_terminal(websocket: WebSocket):
     """WebSocket for local terminal"""
     await websocket.accept()
+
+    # Terminal not supported on Windows
+    if sys.platform == 'win32':
+        await websocket.send_text("Terminal not supported on Windows.\r\n")
+        await websocket.close()
+        return
 
     # Fork a PTY
     pid, fd = pty.fork()
