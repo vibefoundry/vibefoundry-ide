@@ -5,11 +5,13 @@ import CodespaceSync from './components/CodespaceSync'
 import Terminal from './components/Terminal'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
+import LoginScreen from './components/LoginScreen'
 import {
   getFileType,
   getExtension
 } from './utils/fileSystem'
 import { listAllFiles, getFile, syncScriptsToLocal, pushScriptsToCodespace } from './utils/codespaceSync'
+import { getStoredAuth, storeAuth, clearAuth, parseAuthFromUrl, validateAccess } from './utils/auth'
 import './App.css'
 
 function App() {
@@ -44,6 +46,11 @@ function App() {
   const [showCodespaceModal, setShowCodespaceModal] = useState(true)
   const [terminalWidth, setTerminalWidth] = useState(720)
   const [isResizingTerminal, setIsResizingTerminal] = useState(false)
+
+  // Auth state
+  const [authStatus, setAuthStatus] = useState('checking') // 'checking', 'not_logged_in', 'denied', 'allowed', 'error'
+  const [authUser, setAuthUser] = useState(null) // { github_token, github_id, github_username }
+
   const rootHandleRef = useRef(null)
   const mainContentRef = useRef(null)
   const pollIntervalRef = useRef(null)
@@ -145,6 +152,48 @@ function App() {
     document.addEventListener('mousemove', handleResizeMove)
     document.addEventListener('mouseup', handleResizeEnd)
   }, [])
+
+  // Check auth on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      // First check URL params (OAuth redirect)
+      let auth = parseAuthFromUrl()
+      if (auth) {
+        storeAuth(auth.github_token, auth.github_id, auth.github_username)
+        setAuthUser(auth)
+      } else {
+        // Check localStorage
+        auth = getStoredAuth()
+        if (auth) {
+          setAuthUser(auth)
+        }
+      }
+
+      if (!auth) {
+        setAuthStatus('not_logged_in')
+        return
+      }
+
+      // Validate with backend
+      const result = await validateAccess(auth.github_id)
+      if (result.valid) {
+        setAuthStatus('allowed')
+      } else if (result.reason === 'Could not connect to server') {
+        setAuthStatus('error')
+      } else {
+        setAuthStatus('denied')
+      }
+    }
+
+    checkAuth()
+  }, [])
+
+  // Logout handler
+  const handleLogout = () => {
+    clearAuth()
+    setAuthUser(null)
+    setAuthStatus('not_logged_in')
+  }
 
   // Initialize script runner height to 1/4 of main content
   useEffect(() => {
@@ -630,6 +679,17 @@ function App() {
         console.error('Failed to refresh file:', err)
       }
     }
+  }
+
+  // Show login screen if not authenticated
+  if (authStatus !== 'allowed') {
+    return (
+      <LoginScreen
+        status={authStatus}
+        username={authUser?.github_username}
+        onLogout={handleLogout}
+      />
+    )
   }
 
   return (
