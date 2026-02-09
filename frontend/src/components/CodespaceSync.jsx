@@ -55,6 +55,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
   const syncIntervalRef = useRef(null)
   const devicePollRef = useRef(null)
   const lastSyncRef = useRef({})
+  const watchSocketRef = useRef(null)
+  const [useWebSocket, setUseWebSocket] = useState(true) // Try WebSocket first, fall back to polling
 
   // Load codespaces when logged in
   useEffect(() => {
@@ -77,15 +79,77 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     }
   }, [codespaces, syncUrl, selectedCodespace])
 
-  // Auto-sync when connected and enabled
+  // Auto-sync when connected and enabled - use WebSocket or fall back to polling
   useEffect(() => {
-    if (isConnected && autoSync && projectPath) {
+    if (!isConnected || !autoSync || !projectPath || !syncUrl) return
+
+    // Initial sync
+    handleSync()
+
+    // Try WebSocket connection for real-time file change notifications
+    if (useWebSocket) {
+      try {
+        // Convert HTTP URL to WebSocket URL
+        const wsUrl = syncUrl.replace(/^http/, 'ws') + '/watch'
+        console.log('[CodespaceSync] Connecting to watch WebSocket:', wsUrl)
+
+        const ws = new WebSocket(wsUrl)
+        watchSocketRef.current = ws
+
+        ws.onopen = () => {
+          console.log('[CodespaceSync] Watch WebSocket connected')
+          setSyncMessage('Connected (real-time sync)')
+        }
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === 'file_change') {
+              console.log('[CodespaceSync] File changed:', msg.path, msg.change)
+              // File changed in codespace - sync it
+              handleSync()
+            } else if (msg.type === 'connected') {
+              console.log('[CodespaceSync] Watch server connected, watchdog:', msg.watchdog_available)
+            }
+          } catch (e) {
+            // Ignore non-JSON messages
+          }
+        }
+
+        ws.onerror = (err) => {
+          console.warn('[CodespaceSync] Watch WebSocket error, falling back to polling:', err)
+          setUseWebSocket(false)
+        }
+
+        ws.onclose = () => {
+          console.log('[CodespaceSync] Watch WebSocket closed')
+          watchSocketRef.current = null
+          // If we were connected and WebSocket closed, fall back to polling
+          // This handles cases like codespace restart
+          if (isConnected) {
+            console.log('[CodespaceSync] WebSocket closed while connected, falling back to polling')
+            setUseWebSocket(false)
+          }
+        }
+
+        return () => {
+          if (watchSocketRef.current) {
+            watchSocketRef.current.close()
+            watchSocketRef.current = null
+          }
+        }
+      } catch (err) {
+        console.warn('[CodespaceSync] WebSocket not available, falling back to polling:', err)
+        setUseWebSocket(false)
+      }
+    }
+
+    // Fallback: polling every 3 seconds (instead of 1 second)
+    if (!useWebSocket) {
+      console.log('[CodespaceSync] Using polling fallback (every 3s)')
       syncIntervalRef.current = setInterval(() => {
         handleSync()
-      }, 1000)
-
-      // Initial sync
-      handleSync()
+      }, 3000)
 
       return () => {
         if (syncIntervalRef.current) {
@@ -93,7 +157,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
         }
       }
     }
-  }, [isConnected, autoSync, projectPath, syncUrl])
+  }, [isConnected, autoSync, projectPath, syncUrl, useWebSocket])
 
   // Check connection when codespace selected
   useEffect(() => {
@@ -253,6 +317,10 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
   const handleLogout = () => {
     if (devicePollRef.current) clearTimeout(devicePollRef.current)
     if (syncIntervalRef.current) clearInterval(syncIntervalRef.current)
+    if (watchSocketRef.current) {
+      watchSocketRef.current.close()
+      watchSocketRef.current = null
+    }
     clearCredentials()
     setToken(null)
     setUser(null)
@@ -261,11 +329,17 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     setSyncUrl(null)
     setIsConnected(false)
     setDeviceCode(null)
+    setUseWebSocket(true) // Reset for next connection
     // Notify parent of auth change
     if (onAuthChange) onAuthChange(null)
   }
 
   const handleSelectCodespace = (codespace) => {
+    // Close existing WebSocket if switching codespaces
+    if (watchSocketRef.current) {
+      watchSocketRef.current.close()
+      watchSocketRef.current = null
+    }
     setSelectedCodespace(codespace)
     const url = getCodespaceSyncUrl(codespace)
     setSyncUrl(url)
@@ -273,6 +347,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     setSyncStatus('idle')
     lastSyncRef.current = {}
     setLastSync({})
+    setUseWebSocket(true) // Try WebSocket for new connection
   }
 
   const handleCreateCodespace = async () => {
