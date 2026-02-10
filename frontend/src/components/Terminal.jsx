@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -53,6 +54,15 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
+
+    // FitAddon to auto-size terminal to container
+    const fitAddon = new FitAddon()
+    xterm.loadAddon(fitAddon)
+    fitAddon.fit()
+
+    // Refit on window resize
+    const handleResize = () => fitAddon.fit()
+    window.addEventListener('resize', handleResize)
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
     xterm.attachCustomKeyEventHandler((event) => {
@@ -151,6 +161,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       if (pingInterval) clearInterval(pingInterval)
       inputDisposable.dispose()
       terminalElement?.removeEventListener('contextmenu', handleContextMenu)
+      window.removeEventListener('resize', handleResize)
       ws.close()
       xterm.dispose()
     }
