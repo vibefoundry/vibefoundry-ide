@@ -27,6 +27,7 @@ function shouldBlockSync(filename) {
 export async function writeTimeKeeper(baseUrl) {
   try {
     const timestamp = new Date().toISOString()
+    console.log('[TimeKeeper] Writing ping:', timestamp)
 
     // Read existing content first
     let existingContent = ""
@@ -54,9 +55,14 @@ export async function writeTimeKeeper(baseUrl) {
       },
       body: JSON.stringify({ content: newContent })
     })
+    if (response.ok) {
+      console.log('[TimeKeeper] Ping written successfully')
+    } else {
+      console.error('[TimeKeeper] Write failed:', response.status)
+    }
     return response.ok
   } catch (err) {
-    console.error("Time keeper write failed:", err)
+    console.error("[TimeKeeper] Write failed:", err)
     return false
   }
 }
