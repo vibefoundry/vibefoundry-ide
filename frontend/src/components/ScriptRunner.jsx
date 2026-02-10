@@ -70,15 +70,25 @@ function ScriptRunner({ folderName, height }) {
         console.log('Script watcher connected')
       }
 
+      // Debounce script changes to prevent duplicate modals
+      let scriptChangeTimeout = null
+      const recentScripts = new Set()
+
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
           if (data.type === 'script_change') {
+            const scriptPath = data.path
+
+            // Skip if we just processed this script (debounce)
+            if (recentScripts.has(scriptPath)) return
+            recentScripts.add(scriptPath)
+            setTimeout(() => recentScripts.delete(scriptPath), 2000)
+
             // Refresh scripts list
             fetchScripts()
 
             // Add to pending scripts modal (avoid duplicates, auto-check new scripts)
-            const scriptPath = data.path
             setPendingScripts(prev => {
               if (prev.includes(scriptPath)) return prev
               return [...prev, scriptPath]
@@ -88,7 +98,12 @@ function ScriptRunner({ folderName, height }) {
               next.add(scriptPath)
               return next
             })
-            setShowPendingModal(true)
+
+            // Debounce showing modal to batch rapid changes
+            if (scriptChangeTimeout) clearTimeout(scriptChangeTimeout)
+            scriptChangeTimeout = setTimeout(() => {
+              setShowPendingModal(true)
+            }, 500)
           } else if (data.type === 'data_change') {
             addOutput('Data files changed - metadata updated', 'info')
           }

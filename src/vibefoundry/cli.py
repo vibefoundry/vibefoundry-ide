@@ -105,15 +105,8 @@ def main(args: Optional[list[str]] = None):
     host = parsed_args.host
     local_url = f"http://{host}:{port}"
 
-    # Use hosted frontend by default, local only if --dev flag
-    if parsed_args.dev:
-        url = local_url
-    else:
-        url = f"https://vibefoundry.ai/app?port={port}"
-
     print(f"Starting VibeFoundry IDE v{__version__}")
-    print(f"Backend: {local_url}")
-    print(f"App: {url}")
+    print(f"App: {local_url}")
 
     # Handle Ctrl+C gracefully
     shutdown_event = threading.Event()
@@ -139,7 +132,7 @@ def main(args: Optional[list[str]] = None):
 
     # Open browser
     if not parsed_args.no_browser:
-        app_mode = launch_app_mode(url)
+        app_mode = launch_app_mode(local_url)
         if app_mode:
             print("Opened in app mode (Chrome/Edge)")
         else:

@@ -13,7 +13,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: calc(100vh / 0.78);
   zoom: 0.78;
 }
 

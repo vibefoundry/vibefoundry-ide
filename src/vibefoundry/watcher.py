@@ -4,6 +4,7 @@ Uses watchdog (native OS events) when available, falls back to polling.
 """
 
 import asyncio
+import os
 import threading
 import time
 from pathlib import Path
@@ -74,13 +75,16 @@ class FolderHandler(FileSystemEventHandler):
         if should_ignore(path):
             return
 
-        # Debounce (1.5 seconds to catch Windows rapid events)
+        # Normalize path for debounce key (Windows can report same file with different casing)
+        debounce_key = os.path.normcase(os.path.normpath(path))
+
+        # Debounce (3 seconds to catch Windows rapid file events)
         now = time.time()
         with self._lock:
-            if now - self._recent_events.get(path, 0) < 1.5:
+            if now - self._recent_events.get(debounce_key, 0) < 3.0:
                 return
-            self._recent_events[path] = now
-            self._recent_events = {k: v for k, v in self._recent_events.items() if now - v < 5.0}
+            self._recent_events[debounce_key] = now
+            self._recent_events = {k: v for k, v in self._recent_events.items() if now - v < 10.0}
 
         if self.on_change:
             self.on_change(FileChange(path=path, change_type=change_type, folder_type=self.folder_type))
