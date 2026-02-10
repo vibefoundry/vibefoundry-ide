@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -19,6 +18,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     if (!terminalRef.current || !isConnected || !syncUrl) return
 
     // Create terminal with fixed size
+    // Force devicePixelRatio to 1 to fix mouse offset on HiDPI Windows displays
     const xterm = new XTerm({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -29,6 +29,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       rows: FIXED_ROWS,
       smoothScrollDuration: 100,
       scrollSensitivity: 1,
+      devicePixelRatio: 1,
       theme: {
         background: '#ffffff',
         foreground: '#1e1e1e',
@@ -55,14 +56,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
-
-    // Load WebGL addon for better rendering and HiDPI support
-    try {
-      const webglAddon = new WebglAddon()
-      xterm.loadAddon(webglAddon)
-    } catch (e) {
-      console.warn('WebGL addon failed to load, using default renderer:', e)
-    }
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
     xterm.attachCustomKeyEventHandler((event) => {
