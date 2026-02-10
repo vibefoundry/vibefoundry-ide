@@ -678,20 +678,11 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           </button>
           {selectedCodespace && (
             <button
-              className="btn-small btn-connect"
-              onClick={handleConnect}
-              disabled={isConnecting || isConnected}
-            >
-              {isConnecting ? 'Connecting...' : isConnected ? 'Connected' : 'Connect'}
-            </button>
-          )}
-          {selectedCodespace && (
-            <button
               className="btn-small"
               onClick={handleLaunchCodespace}
               disabled={isLaunchingCodespace}
             >
-              {isLaunchingCodespace ? 'Opening...' : 'Open'}
+              {isLaunchingCodespace ? 'Launching...' : 'Launch'}
             </button>
           )}
           {selectedCodespace && (
@@ -725,7 +716,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           {!isConnected && !isLaunchingCodespace && (
             <div className="sync-message info">
               {selectedCodespace.state !== 'Available'
-                ? 'Click "Open" to restart your codespace'
+                ? 'Click "Launch" to restart your codespace'
                 : 'Codespace is running but sync server not responding'}
             </div>
           )}

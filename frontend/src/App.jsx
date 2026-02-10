@@ -1025,7 +1025,7 @@ function App() {
       {/* Bottom Bar */}
       {canWrite && tree.length > 0 && (
         <div className="bottom-bar">
-          <span className="bottom-bar-text">VibeFoundry IDE v0.1.36</span>
+          <span className="bottom-bar-text">VibeFoundry IDE v0.1.37</span>
         </div>
       )}
 
