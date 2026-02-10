@@ -369,8 +369,22 @@ async def list_directory(path: str = ""):
     }
 
 
-def build_file_tree(path: Path, base_path: Path) -> dict:
-    """Build a file tree recursively"""
+# Extensions forbidden in app_folder (raw data files)
+FORBIDDEN_APP_FOLDER_EXTENSIONS = {
+    '.csv', '.xlsx', '.xls', '.xlsm', '.xlsb',  # Spreadsheets
+    '.pdf',  # PDFs
+    '.doc', '.docx',  # Word docs
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',  # Images
+    '.json',  # JSON data
+    '.ppt', '.pptx',  # PowerPoint
+}
+
+
+def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_app_folder: bool = False) -> dict:
+    """Build a file tree recursively, auto-deleting forbidden files in app_folder"""
+    if deleted_files is None:
+        deleted_files = []
+
     rel_path = str(path.relative_to(base_path))
     is_file = path.is_file()
     node = {
@@ -383,12 +397,27 @@ def build_file_tree(path: Path, base_path: Path) -> dict:
 
     if path.is_dir():
         children = []
+        # Check if we're entering app_folder
+        entering_app_folder = in_app_folder or path.name == "app_folder"
         try:
             for item in sorted(path.iterdir()):
                 # Skip hidden files
                 if item.name.startswith('.'):
                     continue
-                children.append(build_file_tree(item, base_path))
+
+                # Auto-delete forbidden files in app_folder
+                if entering_app_folder and item.is_file():
+                    ext = item.suffix.lower()
+                    if ext in FORBIDDEN_APP_FOLDER_EXTENSIONS:
+                        try:
+                            item.unlink()
+                            deleted_files.append(item.name)
+                            print(f"[Safety] Auto-deleted forbidden file: {item.name}")
+                        except Exception as e:
+                            print(f"[Safety] Failed to delete {item.name}: {e}")
+                        continue  # Don't add to tree
+
+                children.append(build_file_tree(item, base_path, deleted_files, entering_app_folder))
         except PermissionError:
             pass
         node["children"] = children
@@ -402,8 +431,9 @@ async def get_file_tree():
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
-    tree = build_file_tree(state.project_folder, state.project_folder)
-    return {"tree": tree}
+    deleted_files = []
+    tree = build_file_tree(state.project_folder, state.project_folder, deleted_files)
+    return {"tree": tree, "deletedFiles": deleted_files}
 
 
 @app.get("/api/files/read")

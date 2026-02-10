@@ -235,6 +235,12 @@ function App() {
           const data = await res.json()
           const newTree = data.tree
 
+          // Show toast if files were deleted
+          if (data.deletedFiles && data.deletedFiles.length > 0) {
+            setDeletedFileToast({ filename: data.deletedFiles[0] })
+            setTimeout(() => setDeletedFileToast(null), 3000)
+          }
+
           setTree(prevTree => {
             const oldHash = getTreeHash(prevTree)
             const newHash = getTreeHash([newTree])
@@ -436,6 +442,11 @@ function App() {
       if (treeRes.ok) {
         const treeData = await treeRes.json()
         setTree([treeData.tree])
+        // Show toast if files were deleted
+        if (treeData.deletedFiles && treeData.deletedFiles.length > 0) {
+          setDeletedFileToast({ filename: treeData.deletedFiles[0] })
+          setTimeout(() => setDeletedFileToast(null), 3000)
+        }
       }
 
       setSelectedFile(null)
@@ -534,6 +545,11 @@ function App() {
         if (res.ok) {
           const data = await res.json()
           setTree([data.tree])
+          // Show toast if files were deleted
+          if (data.deletedFiles && data.deletedFiles.length > 0) {
+            setDeletedFileToast({ filename: data.deletedFiles[0] })
+            setTimeout(() => setDeletedFileToast(null), 3000)
+          }
         }
       } catch (err) {
         console.error('Failed to refresh tree:', err)
