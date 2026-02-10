@@ -3,8 +3,8 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
-const FIXED_COLS = 75
-const FIXED_ROWS = 70
+const FIXED_COLS = 80
+const FIXED_ROWS = 60
 const DEFAULT_FONT_SIZE = 14
 const MIN_FONT_SIZE = 10
 const MAX_FONT_SIZE = 24
