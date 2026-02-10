@@ -366,7 +366,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
       const codespaceUrl = `https://${newCodespace.name}.github.dev`
       window.open(codespaceUrl, '_blank')
 
-      setSyncMessage('Codespace created! Opening in new tab...')
+      setSyncMessage('Codespace created! Launching in new tab...')
 
       // Refresh list in background to get updated state
       loadCodespaces()
