@@ -27,6 +27,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       rows: FIXED_ROWS,
       smoothScrollDuration: 100,
       scrollSensitivity: 1,
+      rightClickSelectsWord: true,
       theme: {
         background: '#ffffff',
         foreground: '#1e1e1e',
@@ -53,6 +54,42 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
+
+    // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
+    xterm.attachCustomKeyEventHandler((event) => {
+      // Ctrl+C or Cmd+C: copy if there's a selection
+      if ((event.ctrlKey || event.metaKey) && event.key === 'c' && event.type === 'keydown') {
+        const selection = xterm.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+          return false // Prevent xterm from handling it
+        }
+        // No selection - let it pass through as SIGINT
+      }
+
+      // Ctrl+V or Cmd+V: paste from clipboard
+      if ((event.ctrlKey || event.metaKey) && event.key === 'v' && event.type === 'keydown') {
+        navigator.clipboard.readText().then(text => {
+          if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(text)
+          }
+        })
+        return false // Prevent xterm from handling it
+      }
+
+      return true // Let xterm handle other keys
+    })
+
+    // Right-click to paste
+    const handleContextMenu = (event) => {
+      event.preventDefault()
+      navigator.clipboard.readText().then(text => {
+        if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(text)
+        }
+      })
+    }
+    terminalRef.current.addEventListener('contextmenu', handleContextMenu)
 
     // Connect WebSocket
     const wsUrl = syncUrl.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
@@ -110,9 +147,11 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       }
     })
 
+    const terminalElement = terminalRef.current
     return () => {
       if (pingInterval) clearInterval(pingInterval)
       inputDisposable.dispose()
+      terminalElement?.removeEventListener('contextmenu', handleContextMenu)
       ws.close()
       xterm.dispose()
     }
