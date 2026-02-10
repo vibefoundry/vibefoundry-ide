@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -54,6 +55,14 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
+
+    // Load canvas addon for proper rendering and mouse handling on HiDPI displays
+    try {
+      const canvasAddon = new CanvasAddon()
+      xterm.loadAddon(canvasAddon)
+    } catch (e) {
+      console.warn('Canvas addon failed to load:', e)
+    }
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
     xterm.attachCustomKeyEventHandler((event) => {
