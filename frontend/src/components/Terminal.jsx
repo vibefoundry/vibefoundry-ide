@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { CanvasAddon } from '@xterm/addon-canvas'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
-const FIXED_COLS = 85
+const FIXED_COLS = 90
 const FIXED_ROWS = 40
 
 function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
@@ -27,7 +27,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       scrollback: 1000,
       cols: FIXED_COLS,
       rows: FIXED_ROWS,
-      smoothScrollDuration: 100,
       scrollSensitivity: 1,
       theme: {
         background: '#ffffff',
@@ -56,12 +55,12 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
 
-    // Load canvas addon for proper rendering and mouse handling on HiDPI displays
+    // Load WebGL addon for GPU-accelerated rendering and smooth scrolling
     try {
-      const canvasAddon = new CanvasAddon()
-      xterm.loadAddon(canvasAddon)
+      const webglAddon = new WebglAddon()
+      xterm.loadAddon(webglAddon)
     } catch (e) {
-      console.warn('Canvas addon failed to load:', e)
+      console.warn('WebGL addon failed to load:', e)
     }
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
