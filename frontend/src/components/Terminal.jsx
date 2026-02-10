@@ -217,11 +217,22 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     return null
   }
 
+  const handleZoomIn = () => setFontSize(prev => Math.min(prev + 1, MAX_FONT_SIZE))
+  const handleZoomOut = () => setFontSize(prev => Math.max(prev - 1, MIN_FONT_SIZE))
+  const handleZoomReset = () => setFontSize(DEFAULT_FONT_SIZE)
+
   return (
     <div className="terminal-container">
-      <div className="terminal-status">
-        <span className={`terminal-dot ${isTerminalConnected ? 'connected' : ''}`}></span>
-        <span>{isTerminalConnected ? 'Connected' : 'Connecting...'}</span>
+      <div className="terminal-toolbar">
+        <div className="terminal-status">
+          <span className={`terminal-dot ${isTerminalConnected ? 'connected' : ''}`}></span>
+          <span>{isTerminalConnected ? 'Connected' : 'Connecting...'}</span>
+        </div>
+        <div className="terminal-zoom-controls">
+          <button onClick={handleZoomOut} title="Zoom out (Ctrl -)">−</button>
+          <span className="zoom-level" onClick={handleZoomReset} title="Reset zoom (Ctrl 0)">{fontSize}px</span>
+          <button onClick={handleZoomIn} title="Zoom in (Ctrl +)">+</button>
+        </div>
       </div>
       <div className="terminal-body" ref={terminalRef}></div>
 
