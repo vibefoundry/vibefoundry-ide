@@ -4,7 +4,7 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
-const FIXED_COLS = 70
+const FIXED_COLS = 80
 const FIXED_ROWS = 50
 const DEFAULT_FONT_SIZE = 14
 const MIN_FONT_SIZE = 10

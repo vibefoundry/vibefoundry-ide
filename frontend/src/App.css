@@ -2264,6 +2264,8 @@ body {
   border-left: 1px solid var(--color-border);
   overflow: hidden;
   position: relative;
+  height: 900px;
+  align-self: center;
 }
 
 .terminal-pane.resizing {
@@ -2480,6 +2482,9 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .terminal-dot {
