@@ -545,7 +545,14 @@ const DeleteDialog = ({ node, onConfirm, onCancel }) => {
 // Data files that should never show animations (they get auto-deleted)
 const FORBIDDEN_DATA_EXTENSIONS = ['.csv', '.xlsx', '.xls', '.json']
 // Files that should never show animations (internal system files)
-const IGNORED_ANIMATION_FILES = ['time_keeper.txt']
+// Include variations to handle different path formats
+const IGNORED_ANIMATION_FILES = [
+  'time_keeper.txt', 'time_keeper',
+  '.DS_Store', 'Thumbs.db', 'desktop.ini',
+  '.gitignore', '.gitattributes',
+  '__pycache__', '.pyc', '.pyo',
+  'Zone.Identifier'  // Windows downloaded file marker
+]
 
 const FileTree = ({
   tree,
@@ -586,6 +593,7 @@ const FileTree = ({
   const elementRefs = useRef(new Map())
   const trashRef = useRef(null)
   const isMovingRef = useRef(false) // Track drag-move operations to suppress notifications
+  const animationTimeoutsRef = useRef([]) // Track animation timeouts for cleanup
 
   const registerRef = useCallback((path, element) => {
     elementRefs.current.set(path, element)
@@ -671,48 +679,87 @@ const FileTree = ({
         break
 
       case 'addData':
-        // Open file picker for multiple files
-        try {
-          const fileHandles = await window.showOpenFilePicker({
-            multiple: true,
-            types: [
-              {
-                description: 'Data files',
-                accept: {
-                  'text/csv': ['.csv'],
-                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                  'application/vnd.ms-excel': ['.xls'],
-                  'application/json': ['.json'],
-                  'text/plain': ['.txt']
+        // Check if we have File System Access API (browser mode) or need to use backend API
+        if (node.handle) {
+          // Browser mode - use File System Access API
+          try {
+            const fileHandles = await window.showOpenFilePicker({
+              multiple: true,
+              types: [
+                {
+                  description: 'Data files',
+                  accept: {
+                    'text/csv': ['.csv'],
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                    'application/vnd.ms-excel': ['.xls'],
+                    'application/json': ['.json'],
+                    'text/plain': ['.txt']
+                  }
+                },
+                {
+                  description: 'All files',
+                  accept: {
+                    '*/*': []
+                  }
                 }
-              },
-              {
-                description: 'All files',
-                accept: {
-                  '*/*': []
+              ]
+            })
+
+            // Copy each selected file to the target folder
+            for (const fileHandle of fileHandles) {
+              const file = await fileHandle.getFile()
+              const content = await file.arrayBuffer()
+              const newFileHandle = await node.handle.getFileHandle(file.name, { create: true })
+              const writable = await newFileHandle.createWritable()
+              await writable.write(content)
+              await writable.close()
+            }
+
+            // Expand the folder and refresh
+            setExpandedPaths(prev => new Set([...prev, node.path]))
+            if (onRefresh) onRefresh()
+          } catch (err) {
+            if (err.name !== 'AbortError') {
+              console.error('Add data failed:', err)
+              alert('Failed to add data: ' + err.message)
+            }
+          }
+        } else {
+          // Local backend mode - use file input and upload API
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.multiple = true
+          input.accept = '.csv,.xlsx,.xls,.json,.txt'
+          input.onchange = async (e) => {
+            const files = e.target.files
+            if (!files || files.length === 0) return
+
+            try {
+              for (const file of files) {
+                const formData = new FormData()
+                formData.append('file', file)
+                formData.append('folder', node.path)
+
+                const response = await fetch('/api/files/upload', {
+                  method: 'POST',
+                  body: formData
+                })
+
+                if (!response.ok) {
+                  const data = await response.json()
+                  throw new Error(data.detail || 'Upload failed')
                 }
               }
-            ]
-          })
 
-          // Copy each selected file to the target folder
-          for (const fileHandle of fileHandles) {
-            const file = await fileHandle.getFile()
-            const content = await file.arrayBuffer()
-            const newFileHandle = await node.handle.getFileHandle(file.name, { create: true })
-            const writable = await newFileHandle.createWritable()
-            await writable.write(content)
-            await writable.close()
+              // Expand the folder and refresh
+              setExpandedPaths(prev => new Set([...prev, node.path]))
+              if (onRefresh) onRefresh()
+            } catch (err) {
+              console.error('Upload failed:', err)
+              alert('Failed to upload: ' + err.message)
+            }
           }
-
-          // Expand the folder and refresh
-          setExpandedPaths(prev => new Set([...prev, node.path]))
-          if (onRefresh) onRefresh()
-        } catch (err) {
-          if (err.name !== 'AbortError') {
-            console.error('Add data failed:', err)
-            alert('Failed to add data: ' + err.message)
-          }
+          input.click()
         }
         break
     }
@@ -864,8 +911,12 @@ const FileTree = ({
       if (!path) return false
 
       // Check for ignored system files (like time_keeper.txt)
-      const filename = path.split('/').pop()
+      // Handle both forward slashes and backslashes (Windows)
+      const filename = path.split(/[/\\]/).pop()
       if (IGNORED_ANIMATION_FILES.includes(filename)) return true
+      // Also check if path contains any ignored filename (handles edge cases)
+      const pathLowerForIgnore = path.toLowerCase()
+      if (IGNORED_ANIMATION_FILES.some(f => pathLowerForIgnore.includes(f.toLowerCase()))) return true
 
       const pathLower = path.toLowerCase()
       const isInAppFolder = pathLower.includes('/app_folder/') ||
@@ -982,19 +1033,25 @@ const FileTree = ({
         setShowTrash(true)
       }
 
+      // Clear any existing timeouts to prevent stacking
+      animationTimeoutsRef.current.forEach(t => clearTimeout(t))
+      animationTimeoutsRef.current = []
+
       setNotifications(newNotifications)
 
-      setTimeout(() => {
+      const t1 = setTimeout(() => {
         setAnimatingNotifications(newNotifications)
         setNotifications([])
       }, 2000)
 
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
         setAnimatingNotifications([])
         setNewPaths(new Set())
         setModifiedPathsState(new Set())
         setShowTrash(false)
       }, 3000)
+
+      animationTimeoutsRef.current = [t1, t2]
     }
 
     prevPathsRef.current = currentPaths

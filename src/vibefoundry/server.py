@@ -1058,18 +1058,13 @@ async def notify_data_change():
 
 async def notify_script_change(script_path: Path):
     """Notify all WebSocket clients of script change"""
-    # Convert to relative path with forward slashes (works on all platforms)
-    rel_path = script_path.name  # Just the filename
-    if state.project_folder:
-        try:
-            rel_path = str(script_path.relative_to(state.project_folder / "app_folder" / "scripts"))
-        except ValueError:
-            rel_path = script_path.name
-    # Use forward slashes for consistency
-    rel_path = rel_path.replace("\\", "/")
+    # Send full absolute path (same format as /api/scripts endpoint)
+    full_path = str(script_path)
+    # Use forward slashes for consistency on Windows
+    full_path = full_path.replace("\\", "/")
 
-    print(f"[Script Change] Notifying {len(state.websocket_clients)} clients: {rel_path}")
-    message = json.dumps({"type": "script_change", "path": rel_path})
+    print(f"[Script Change] Notifying {len(state.websocket_clients)} clients: {full_path}")
+    message = json.dumps({"type": "script_change", "path": full_path})
     disconnected = []
 
     for client in state.websocket_clients:

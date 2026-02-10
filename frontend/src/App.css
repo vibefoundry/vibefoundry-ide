@@ -107,6 +107,22 @@ body {
   background: #22c55e;
 }
 
+/* Bottom Bar */
+.bottom-bar {
+  display: flex;
+  height: 22px;
+  background: var(--color-bg-alt);
+  z-index: 10;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.bottom-bar-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
 /* Standardized Button Base */
 .btn-flat,
 .btn-small,
@@ -193,21 +209,6 @@ body {
   overflow: hidden;
 }
 
-/* Subtle grid background */
-.app::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image:
-    linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
-  background-size: 32px 32px;
-  pointer-events: none;
-  z-index: 0;
-}
 
 .app.resizing {
   cursor: col-resize;

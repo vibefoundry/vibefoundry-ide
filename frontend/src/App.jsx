@@ -248,7 +248,7 @@ function App() {
       }
     }
 
-    pollIntervalRef.current = setInterval(poll, 1000)
+    pollIntervalRef.current = setInterval(poll, 2000)  // Reduced from 1s to improve PC performance
 
     return () => {
       if (pollIntervalRef.current) {
@@ -265,10 +265,12 @@ function App() {
     const wsUrl = `${protocol}//${window.location.host}/ws/watch`
     let ws = null
     let pendingFilePath = null // Track the latest file to load
+    let reconnectTimeout = null
+    let isMounted = true
 
     const loadOutputFile = async (filePath) => {
-      // Skip if already loading
-      if (isAutoPreviewingRef.current) {
+      // Skip if already loading or unmounted
+      if (isAutoPreviewingRef.current || !isMounted) {
         pendingFilePath = filePath // Queue for later
         return
       }
@@ -312,7 +314,7 @@ function App() {
         isAutoPreviewingRef.current = false
 
         // If another file was queued while loading, load it after a delay
-        if (pendingFilePath && pendingFilePath !== filePath) {
+        if (pendingFilePath && pendingFilePath !== filePath && isMounted) {
           const nextFile = pendingFilePath
           pendingFilePath = null
           setTimeout(() => loadOutputFile(nextFile), 300)
@@ -337,6 +339,8 @@ function App() {
     }
 
     const connect = () => {
+      if (!isMounted) return
+
       ws = new WebSocket(wsUrl)
 
       ws.onmessage = (event) => {
@@ -372,14 +376,18 @@ function App() {
       }
 
       ws.onclose = () => {
-        // Reconnect after delay
-        setTimeout(connect, 3000)
+        // Reconnect after delay (only if still mounted)
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connect, 3000)
+        }
       }
     }
 
     connect()
 
     return () => {
+      isMounted = false
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
       if (ws) ws.close()
       if (autoPreviewDebounceRef.current) {
         clearTimeout(autoPreviewDebounceRef.current)
@@ -1007,6 +1015,13 @@ function App() {
           onSelect={handleFolderSelected}
           onCancel={() => setShowFolderPicker(false)}
         />
+      )}
+
+      {/* Bottom Bar */}
+      {canWrite && tree.length > 0 && (
+        <div className="bottom-bar">
+          <span className="bottom-bar-text">VibeFoundry IDE v0.1.28</span>
+        </div>
       )}
 
     </div>

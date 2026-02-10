@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -23,7 +22,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       cursorStyle: 'block',
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 2000,
+      scrollback: 1000,
       cols: FIXED_COLS,
       rows: FIXED_ROWS,
       smoothScrollDuration: 100,
@@ -53,15 +52,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     })
 
     xterm.open(terminalRef.current)
-
-    // Load WebGL addon for GPU-accelerated rendering
-    try {
-      const webglAddon = new WebglAddon()
-      xterm.loadAddon(webglAddon)
-    } catch (e) {
-      console.warn('WebGL addon failed to load, using default renderer:', e)
-    }
-
     xtermRef.current = xterm
 
     // Connect WebSocket

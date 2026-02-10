@@ -50,10 +50,20 @@ function ScriptRunner({ folderName, height }) {
   useEffect(() => {
     if (!folderName) return
 
+    // Close any existing connection first (handles React StrictMode double-mount)
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws/watch`
+    let reconnectTimeout = null
+    let isMounted = true
 
     const connect = () => {
+      if (!isMounted) return
+
       const ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
@@ -88,8 +98,10 @@ function ScriptRunner({ folderName, height }) {
       }
 
       ws.onclose = () => {
-        // Reconnect after delay
-        setTimeout(connect, 3000)
+        // Reconnect after delay (only if still mounted)
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connect, 3000)
+        }
       }
 
       wsRef.current = ws
@@ -98,8 +110,11 @@ function ScriptRunner({ folderName, height }) {
     connect()
 
     return () => {
+      isMounted = false
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
       if (wsRef.current) {
         wsRef.current.close()
+        wsRef.current = null
       }
     }
   }, [folderName])
