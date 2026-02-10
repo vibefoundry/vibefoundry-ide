@@ -3,8 +3,8 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
-const FIXED_COLS = 90
-const FIXED_ROWS = 40
+const FIXED_COLS = 75
+const FIXED_ROWS = 30
 
 function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
   const terminalRef = useRef(null)
