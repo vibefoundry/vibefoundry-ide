@@ -2256,7 +2256,34 @@ body {
 }
 
 /* Terminal Pane - Right Side Panel */
-/* CSS REMOVED FOR TESTING */
+.terminal-pane {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-left: 1px solid var(--color-border);
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-pane.resizing {
+  user-select: none;
+}
+
+.terminal-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 10;
+}
+
+.terminal-resize-handle:hover {
+  background: var(--color-accent);
+}
 
 .script-runner-resize-handle {
   height: 4px;
@@ -2269,7 +2296,48 @@ body {
   background: var(--color-accent);
 }
 
-/* terminal-main, terminal-launch-screen, btn-launch-claude, terminal-launch-message - REMOVED FOR TESTING */
+.terminal-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.terminal-launch-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+}
+
+.btn-launch-claude {
+  padding: 16px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-launch-claude:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.btn-launch-claude:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.terminal-launch-message {
+  font-size: 16px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
 
 /* Codespace Modal - Overlay in Terminal Pane */
 .codespace-modal-overlay {
@@ -2345,7 +2413,65 @@ body {
   color: var(--color-text-muted);
 }
 
-/* Terminal Component - ALL CSS REMOVED FOR TESTING */
+/* Terminal Component */
+.terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #ffffff;
+}
+
+.terminal-status {
+  display: none;
+}
+
+.terminal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+}
+
+.terminal-dot.connected {
+  background: #22c55e;
+}
+
+.terminal-context-menu {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 120px;
+  padding: 4px 0;
+}
+
+.terminal-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.terminal-context-menu button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.terminal-context-menu button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
 
 /* Repository Tabs */
 .repo-tabs {
