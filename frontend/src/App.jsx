@@ -45,7 +45,7 @@ function App() {
   const [scriptRunnerHeight, setScriptRunnerHeight] = useState(null) // null = calculate 1/4 on mount
   const [isResizingScriptRunner, setIsResizingScriptRunner] = useState(false)
   const [showCodespaceModal, setShowCodespaceModal] = useState(true)
-  const [terminalWidth, setTerminalWidth] = useState(720)
+  const [terminalWidth, setTerminalWidth] = useState(900)
   const [isResizingTerminal, setIsResizingTerminal] = useState(false)
   const [scriptChangeEvent, setScriptChangeEvent] = useState(null) // Script change from WebSocket
 
