@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
-import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -55,31 +54,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
-
-    // Load canvas addon for proper rendering and mouse handling
-    try {
-      const canvasAddon = new CanvasAddon()
-      xterm.loadAddon(canvasAddon)
-    } catch (e) {
-      console.warn('Canvas addon failed to load:', e)
-    }
-
-    // Debug: Log mouse click coordinates to diagnose offset issue
-    const handleMouseDown = (event) => {
-      const rect = terminalRef.current.getBoundingClientRect()
-      const canvas = terminalRef.current.querySelector('canvas')
-      const canvasRect = canvas?.getBoundingClientRect()
-
-      console.log('=== MOUSE CLICK DEBUG ===')
-      console.log('Mouse clientX/Y:', event.clientX, event.clientY)
-      console.log('Terminal container rect:', { top: rect.top, left: rect.left, width: rect.width, height: rect.height })
-      console.log('Canvas rect:', canvasRect ? { top: canvasRect.top, left: canvasRect.left, width: canvasRect.width, height: canvasRect.height } : 'no canvas')
-      console.log('Relative to container:', event.clientX - rect.left, event.clientY - rect.top)
-      console.log('Relative to canvas:', canvasRect ? (event.clientX - canvasRect.left) + ', ' + (event.clientY - canvasRect.top) : 'n/a')
-      console.log('window.devicePixelRatio:', window.devicePixelRatio)
-      console.log('========================')
-    }
-    terminalRef.current.addEventListener('mousedown', handleMouseDown)
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
     xterm.attachCustomKeyEventHandler((event) => {
@@ -178,7 +152,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       if (pingInterval) clearInterval(pingInterval)
       inputDisposable.dispose()
       terminalElement?.removeEventListener('contextmenu', handleContextMenu)
-      terminalElement?.removeEventListener('mousedown', handleMouseDown)
       ws.close()
       xterm.dispose()
     }
