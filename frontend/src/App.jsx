@@ -993,6 +993,10 @@ function App() {
                     onConnectionChange={(conn) => {
                       setSyncConnection(conn)
                     }}
+                    onLaunchClaude={() => {
+                      setShowTerminal(true)
+                      setShowCodespaceModal(false)
+                    }}
                     onAuthChange={handleAuthChange}
                   />
                 </div>

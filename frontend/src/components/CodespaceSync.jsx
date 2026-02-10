@@ -21,7 +21,7 @@ import {
   resetCodespace
 } from '../utils/codespaceSync'
 
-function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection, onAuthChange }) {
+function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection, onAuthChange, onLaunchClaude }) {
   // Auth state
   const [token, setToken] = useState(getStoredToken())
   const [user, setUser] = useState(getStoredUser())
@@ -763,6 +763,14 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
               >
                 {isResettingCodespace ? 'Resetting...' : 'Reset Codespace'}
               </button>
+              {onLaunchClaude && (
+                <button
+                  className="btn-small btn-primary"
+                  onClick={onLaunchClaude}
+                >
+                  Launch Claude Code
+                </button>
+              )}
             </div>
           )}
         </div>
