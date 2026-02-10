@@ -5,6 +5,9 @@ import '@xterm/xterm/css/xterm.css'
 // Fixed terminal size - wider and taller for better Claude Code experience
 const FIXED_COLS = 75
 const FIXED_ROWS = 30
+const DEFAULT_FONT_SIZE = 14
+const MIN_FONT_SIZE = 10
+const MAX_FONT_SIZE = 24
 
 function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
   const terminalRef = useRef(null)
@@ -13,6 +16,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
   const [isTerminalConnected, setIsTerminalConnected] = useState(false)
   const hasLaunchedClaudeRef = useRef(false)
   const [contextMenu, setContextMenu] = useState(null)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
 
   useEffect(() => {
     if (!terminalRef.current || !isConnected || !syncUrl) return
@@ -54,7 +58,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
 
-    // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
+    // Handle keyboard shortcuts
     xterm.attachCustomKeyEventHandler((event) => {
       // Ctrl+C or Cmd+C: copy if there's a selection
       if ((event.ctrlKey || event.metaKey) && event.key === 'c' && event.type === 'keydown') {
@@ -74,6 +78,27 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
           }
         })
         return false // Prevent xterm from handling it
+      }
+
+      // Ctrl/Cmd + Plus: zoom in
+      if ((event.ctrlKey || event.metaKey) && (event.key === '=' || event.key === '+') && event.type === 'keydown') {
+        event.preventDefault()
+        setFontSize(prev => Math.min(prev + 1, MAX_FONT_SIZE))
+        return false
+      }
+
+      // Ctrl/Cmd + Minus: zoom out
+      if ((event.ctrlKey || event.metaKey) && event.key === '-' && event.type === 'keydown') {
+        event.preventDefault()
+        setFontSize(prev => Math.max(prev - 1, MIN_FONT_SIZE))
+        return false
+      }
+
+      // Ctrl/Cmd + 0: reset zoom
+      if ((event.ctrlKey || event.metaKey) && event.key === '0' && event.type === 'keydown') {
+        event.preventDefault()
+        setFontSize(DEFAULT_FONT_SIZE)
+        return false
       }
 
       return true // Let xterm handle other keys
@@ -155,6 +180,13 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       xterm.dispose()
     }
   }, [syncUrl, isConnected])
+
+  // Update terminal font size when it changes
+  useEffect(() => {
+    if (xtermRef.current) {
+      xtermRef.current.options.fontSize = fontSize
+    }
+  }, [fontSize])
 
   // Close context menu when clicking elsewhere
   useEffect(() => {
