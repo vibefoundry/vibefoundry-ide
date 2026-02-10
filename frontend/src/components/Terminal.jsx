@@ -12,6 +12,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
   const wsRef = useRef(null)
   const [isTerminalConnected, setIsTerminalConnected] = useState(false)
   const hasLaunchedClaudeRef = useRef(false)
+  const [contextMenu, setContextMenu] = useState(null)
 
   useEffect(() => {
     if (!terminalRef.current || !isConnected || !syncUrl) return
@@ -27,7 +28,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       rows: FIXED_ROWS,
       smoothScrollDuration: 100,
       scrollSensitivity: 1,
-      rightClickSelectsWord: true,
       theme: {
         background: '#ffffff',
         foreground: '#1e1e1e',
@@ -80,13 +80,13 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       return true // Let xterm handle other keys
     })
 
-    // Right-click to paste
+    // Right-click context menu
     const handleContextMenu = (event) => {
       event.preventDefault()
-      navigator.clipboard.readText().then(text => {
-        if (text && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(text)
-        }
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        hasSelection: !!xterm.getSelection()
       })
     }
     terminalRef.current.addEventListener('contextmenu', handleContextMenu)
@@ -157,6 +157,31 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     }
   }, [syncUrl, isConnected])
 
+  // Close context menu when clicking elsewhere
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClick = () => setContextMenu(null)
+    window.addEventListener('click', handleClick)
+    return () => window.removeEventListener('click', handleClick)
+  }, [contextMenu])
+
+  const handleCopy = () => {
+    const selection = xtermRef.current?.getSelection()
+    if (selection) {
+      navigator.clipboard.writeText(selection)
+    }
+    setContextMenu(null)
+  }
+
+  const handlePaste = () => {
+    navigator.clipboard.readText().then(text => {
+      if (text && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(text)
+      }
+    })
+    setContextMenu(null)
+  }
+
   if (!isConnected) {
     return null
   }
@@ -168,6 +193,24 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
         <span>{isTerminalConnected ? 'Connected' : 'Connecting...'}</span>
       </div>
       <div className="terminal-body" ref={terminalRef}></div>
+
+      {contextMenu && (
+        <div
+          className="terminal-context-menu"
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+        >
+          <button onClick={handleCopy} disabled={!contextMenu.hasSelection}>
+            Copy
+          </button>
+          <button onClick={handlePaste}>
+            Paste
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -2441,6 +2441,37 @@ body {
   background: #22c55e;
 }
 
+.terminal-context-menu {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 120px;
+  padding: 4px 0;
+}
+
+.terminal-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.terminal-context-menu button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.terminal-context-menu button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
 /* Repository Tabs */
 .repo-tabs {
   display: flex;
