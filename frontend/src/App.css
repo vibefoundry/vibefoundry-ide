@@ -2262,7 +2262,7 @@ body {
   flex-direction: column;
   background: #ffffff;
   border-left: 1px solid var(--color-border);
-  overflow: hidden;
+  overflow: auto;
   position: relative;
 }
 
@@ -2428,6 +2428,7 @@ body {
 .terminal-body {
   flex: 1;
   min-height: 0;
+  overflow: auto;
 }
 
 .terminal-dot {
