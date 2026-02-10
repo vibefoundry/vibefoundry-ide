@@ -191,7 +191,11 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
         <span className={`terminal-dot ${isTerminalConnected ? 'connected' : ''}`}></span>
         <span>{isTerminalConnected ? 'Connected' : 'Connecting...'}</span>
       </div>
-      <div className="terminal-body" ref={terminalRef}></div>
+      <div
+        className="terminal-body"
+        ref={terminalRef}
+        style={{ zoom: 1 / window.devicePixelRatio }}
+      ></div>
 
       {contextMenu && (
         <div
