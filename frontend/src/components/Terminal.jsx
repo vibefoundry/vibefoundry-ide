@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 
 // Fixed terminal size - wider and taller for better Claude Code experience
@@ -54,6 +55,14 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
 
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
+
+    // Load WebGL addon for better rendering and HiDPI support
+    try {
+      const webglAddon = new WebglAddon()
+      xterm.loadAddon(webglAddon)
+    } catch (e) {
+      console.warn('WebGL addon failed to load, using default renderer:', e)
+    }
 
     // Handle Ctrl+C (copy when selection exists) and Ctrl+V (paste)
     xterm.attachCustomKeyEventHandler((event) => {
