@@ -4,7 +4,7 @@ import './ScriptRunner.css'
 
 let terminalIdCounter = 1
 
-function ScriptRunner({ folderName, height }) {
+function ScriptRunner({ folderName, height, scriptChangeEvent }) {
   const [activeTab, setActiveTab] = useState('scripts') // 'scripts' or 'terminal'
   const [terminals, setTerminals] = useState([{ id: terminalIdCounter }])
   const [activeTerminalId, setActiveTerminalId] = useState(terminalIdCounter)
@@ -21,8 +21,8 @@ function ScriptRunner({ folderName, height }) {
   const [installModal, setInstallModal] = useState({ show: false, module: null, scriptPath: null })
   const [isInstalling, setIsInstalling] = useState(false)
   const outputRef = useRef(null)
-  const wsRef = useRef(null)
   const scriptsResizeRef = useRef(null)
+  const scriptChangeDebounceRef = useRef(null)
   const scriptQueueRef = useRef([])
   const isRunningRef = useRef(false)
 
@@ -46,93 +46,32 @@ function ScriptRunner({ folderName, height }) {
     }
   }, [folderName, fetchScripts])
 
-  // Connect to WebSocket for file change notifications
+  // Handle script change events from App.jsx (single WebSocket connection)
   useEffect(() => {
-    if (!folderName) return
+    if (!scriptChangeEvent) return
 
-    // Close any existing connection first (handles React StrictMode double-mount)
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
+    const scriptPath = scriptChangeEvent.path
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/watch`
-    let reconnectTimeout = null
-    let isMounted = true
+    // Refresh scripts list
+    fetchScripts()
 
-    const connect = () => {
-      if (!isMounted) return
+    // Add to pending scripts modal (avoid duplicates, auto-check new scripts)
+    setPendingScripts(prev => {
+      if (prev.includes(scriptPath)) return prev
+      return [...prev, scriptPath]
+    })
+    setCheckedPendingScripts(prev => {
+      const next = new Set(prev)
+      next.add(scriptPath)
+      return next
+    })
 
-      const ws = new WebSocket(wsUrl)
-
-      ws.onopen = () => {
-        console.log('Script watcher connected')
-      }
-
-      // Debounce script changes to prevent duplicate modals
-      let scriptChangeTimeout = null
-      const recentScripts = new Set()
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'script_change') {
-            const scriptPath = data.path
-
-            // Skip if we just processed this script (debounce)
-            if (recentScripts.has(scriptPath)) return
-            recentScripts.add(scriptPath)
-            setTimeout(() => recentScripts.delete(scriptPath), 2000)
-
-            // Refresh scripts list
-            fetchScripts()
-
-            // Add to pending scripts modal (avoid duplicates, auto-check new scripts)
-            setPendingScripts(prev => {
-              if (prev.includes(scriptPath)) return prev
-              return [...prev, scriptPath]
-            })
-            setCheckedPendingScripts(prev => {
-              const next = new Set(prev)
-              next.add(scriptPath)
-              return next
-            })
-
-            // Debounce showing modal to batch rapid changes
-            if (scriptChangeTimeout) clearTimeout(scriptChangeTimeout)
-            scriptChangeTimeout = setTimeout(() => {
-              setShowPendingModal(true)
-            }, 500)
-          } else if (data.type === 'data_change') {
-            addOutput('Data files changed - metadata updated', 'info')
-          }
-        } catch (e) {
-          // Ignore parse errors for keepalive messages
-        }
-      }
-
-      ws.onclose = () => {
-        // Reconnect after delay (only if still mounted)
-        if (isMounted) {
-          reconnectTimeout = setTimeout(connect, 3000)
-        }
-      }
-
-      wsRef.current = ws
-    }
-
-    connect()
-
-    return () => {
-      isMounted = false
-      if (reconnectTimeout) clearTimeout(reconnectTimeout)
-      if (wsRef.current) {
-        wsRef.current.close()
-        wsRef.current = null
-      }
-    }
-  }, [folderName])
+    // Debounce showing modal to batch rapid changes
+    if (scriptChangeDebounceRef.current) clearTimeout(scriptChangeDebounceRef.current)
+    scriptChangeDebounceRef.current = setTimeout(() => {
+      setShowPendingModal(true)
+    }, 500)
+  }, [scriptChangeEvent, fetchScripts])
 
   // Auto-scroll output
   useEffect(() => {

@@ -47,6 +47,7 @@ function App() {
   const [showCodespaceModal, setShowCodespaceModal] = useState(true)
   const [terminalWidth, setTerminalWidth] = useState(720)
   const [isResizingTerminal, setIsResizingTerminal] = useState(false)
+  const [scriptChangeEvent, setScriptChangeEvent] = useState(null) // Script change from WebSocket
 
   // Auth state - uses existing GitHub auth from CodespaceSync
   const [authStatus, setAuthStatus] = useState('checking') // 'checking', 'not_logged_in', 'denied', 'allowed', 'error'
@@ -369,6 +370,9 @@ function App() {
                 loadOutputFile(bestFile)
               }, 1000) // Wait 1 second for things to settle
             }
+          } else if (data.type === 'script_change' && data.path) {
+            // Forward script changes to ScriptRunner via state
+            setScriptChangeEvent({ path: data.path, timestamp: Date.now() })
           }
         } catch (e) {
           // Ignore parse errors for keepalive messages
@@ -924,6 +928,7 @@ function App() {
               <ScriptRunner
                 folderName={folderName}
                 height={scriptRunnerHeight}
+                scriptChangeEvent={scriptChangeEvent}
               />
             </>
           )}
@@ -1020,7 +1025,7 @@ function App() {
       {/* Bottom Bar */}
       {canWrite && tree.length > 0 && (
         <div className="bottom-bar">
-          <span className="bottom-bar-text">VibeFoundry IDE v0.1.35</span>
+          <span className="bottom-bar-text">VibeFoundry IDE v0.1.36</span>
         </div>
       )}
 
