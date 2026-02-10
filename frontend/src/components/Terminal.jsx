@@ -18,7 +18,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     if (!terminalRef.current || !isConnected || !syncUrl) return
 
     // Create terminal with fixed size
-    // Force devicePixelRatio to 1 to fix mouse offset on HiDPI Windows displays
     const xterm = new XTerm({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -29,7 +28,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       rows: FIXED_ROWS,
       smoothScrollDuration: 100,
       scrollSensitivity: 1,
-      devicePixelRatio: 1,
       theme: {
         background: '#ffffff',
         foreground: '#1e1e1e',
