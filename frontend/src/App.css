@@ -207,7 +207,6 @@ body {
 .main-area {
   display: flex;
   flex: 1;
-  overflow: hidden;
 }
 
 
