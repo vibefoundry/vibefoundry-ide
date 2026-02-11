@@ -954,52 +954,50 @@ function App() {
         {!terminalCollapsed && (
           <div className={`terminal-pane ${isResizingTerminal ? 'resizing' : ''}`} style={{ width: terminalWidth }}>
             <div className="terminal-resize-handle" onMouseDown={handleTerminalResizeStart} />
-            <div className="terminal-main">
-              {showTerminal && syncConnection.syncUrl ? (
-                <Terminal
-                  syncUrl={syncConnection.syncUrl}
-                  isConnected={syncConnection.isConnected}
-                  autoLaunchClaude={true}
-                />
-              ) : (
-                <div className="terminal-launch-screen">
-                  {syncConnection.syncUrl && !showCodespaceModal && (
-                    <button
-                      className="btn-launch-claude"
-                      onClick={() => setShowTerminal(true)}
-                      disabled={!syncConnection.isConnected}
-                    >
-                      Launch Claude Code in Virtual Sandbox
-                    </button>
-                  )}
-                </div>
-              )}
+            {showTerminal && syncConnection.syncUrl ? (
+              <Terminal
+                syncUrl={syncConnection.syncUrl}
+                isConnected={syncConnection.isConnected}
+                autoLaunchClaude={true}
+              />
+            ) : (
+              <div className="terminal-launch-screen">
+                {syncConnection.syncUrl && !showCodespaceModal && (
+                  <button
+                    className="btn-launch-claude"
+                    onClick={() => setShowTerminal(true)}
+                    disabled={!syncConnection.isConnected}
+                  >
+                    Launch Claude Code in Virtual Sandbox
+                  </button>
+                )}
+              </div>
+            )}
 
-              {/* Codespace Modal - always render CodespaceSync to keep sync running */}
-              <div
-                className="codespace-modal-overlay"
-                style={{ display: showCodespaceModal ? 'flex' : 'none' }}
-                onClick={() => setShowCodespaceModal(false)}
-              >
-                <div className="codespace-modal" onClick={(e) => e.stopPropagation()}>
-                  <button className="codespace-modal-close" onClick={() => setShowCodespaceModal(false)}>×</button>
-                  <CodespaceSync
-                    projectPath={projectPath}
-                    currentConnection={syncConnection}
-                    onSyncComplete={() => {
-                      handleRefresh()
-                      if (activeTab === 'codespace') loadCodespaceFiles()
-                    }}
-                    onConnectionChange={(conn) => {
-                      setSyncConnection(conn)
-                    }}
-                    onLaunchClaude={() => {
-                      setShowTerminal(true)
-                      setShowCodespaceModal(false)
-                    }}
-                    onAuthChange={handleAuthChange}
-                  />
-                </div>
+            {/* Codespace Modal - always render CodespaceSync to keep sync running */}
+            <div
+              className="codespace-modal-overlay"
+              style={{ display: showCodespaceModal ? 'flex' : 'none' }}
+              onClick={() => setShowCodespaceModal(false)}
+            >
+              <div className="codespace-modal" onClick={(e) => e.stopPropagation()}>
+                <button className="codespace-modal-close" onClick={() => setShowCodespaceModal(false)}>×</button>
+                <CodespaceSync
+                  projectPath={projectPath}
+                  currentConnection={syncConnection}
+                  onSyncComplete={() => {
+                    handleRefresh()
+                    if (activeTab === 'codespace') loadCodespaceFiles()
+                  }}
+                  onConnectionChange={(conn) => {
+                    setSyncConnection(conn)
+                  }}
+                  onLaunchClaude={() => {
+                    setShowTerminal(true)
+                    setShowCodespaceModal(false)
+                  }}
+                  onAuthChange={handleAuthChange}
+                />
               </div>
             </div>
           </div>
