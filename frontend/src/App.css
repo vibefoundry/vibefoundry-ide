@@ -2407,12 +2407,6 @@ body {
 }
 
 /* Terminal Component */
-.terminal-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: #ffffff;
-}
 
 .terminal-toolbar {
   display: flex;

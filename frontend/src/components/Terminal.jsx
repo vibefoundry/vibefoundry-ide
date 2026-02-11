@@ -231,7 +231,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
   const handleZoomReset = () => setFontSize(DEFAULT_FONT_SIZE)
 
   return (
-    <div className="terminal-container">
+    <>
       <div className="terminal-toolbar">
         <div className="terminal-status">
           <span className={`terminal-dot ${isTerminalConnected ? 'connected' : ''}`}></span>
@@ -262,7 +262,7 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
           </button>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
