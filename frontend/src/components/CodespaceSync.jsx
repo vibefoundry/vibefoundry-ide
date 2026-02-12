@@ -819,39 +819,38 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
               {syncMessage}
             </div>
           )}
-          {isConnected && (
-            <div className="sync-controls">
-              <label className="sync-auto-label">
-                <input
-                  type="checkbox"
-                  checked={autoSync}
-                  onChange={(e) => setAutoSync(e.target.checked)}
-                />
-                Auto-sync
-              </label>
-              <button
-                className="btn-small btn-sync"
-                onClick={handleSync}
-                disabled={isSyncing}
-              >
-                {isSyncing ? 'Syncing...' : 'Sync Now'}
-              </button>
-              <button
-                className="btn-small"
-                onClick={handlePushScripts}
-                disabled={isPushing}
-              >
-                {isPushing ? 'Pulling...' : 'Pull Scripts'}
-              </button>
-              <button
-                className="btn-small btn-warning"
-                onClick={handleResetCodespace}
-                disabled={isResettingCodespace}
-              >
-                {isResettingCodespace ? 'Resetting...' : 'Reset'}
-              </button>
-            </div>
-          )}
+          <div className="sync-controls">
+            <label className="sync-auto-label">
+              <input
+                type="checkbox"
+                checked={autoSync}
+                onChange={(e) => setAutoSync(e.target.checked)}
+                disabled={!isConnected}
+              />
+              Auto-sync
+            </label>
+            <button
+              className="btn-small btn-sync"
+              onClick={handleSync}
+              disabled={!isConnected || isSyncing}
+            >
+              {isSyncing ? 'Syncing...' : 'Sync Now'}
+            </button>
+            <button
+              className="btn-small"
+              onClick={handlePushScripts}
+              disabled={!isConnected || isPushing}
+            >
+              {isPushing ? 'Pushing...' : 'Push Scripts'}
+            </button>
+            <button
+              className="btn-small btn-warning"
+              onClick={handleResetCodespace}
+              disabled={!isConnected || isResettingCodespace}
+            >
+              {isResettingCodespace ? 'Resetting...' : 'Reset'}
+            </button>
+          </div>
         </div>
       )}
 
