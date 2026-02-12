@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import CodespaceSync from './components/CodespaceSync'
@@ -6,6 +7,7 @@ import Terminal from './components/Terminal'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
 import LoginScreen from './components/LoginScreen'
+import SplitWorkspace from './components/SplitWorkspace'
 import {
   getFileType,
   getExtension
@@ -44,10 +46,22 @@ function App() {
   const [projectPath, setProjectPath] = useState(null)
   const [scriptRunnerHeight, setScriptRunnerHeight] = useState(null) // null = calculate 1/4 on mount
   const [isResizingScriptRunner, setIsResizingScriptRunner] = useState(false)
-  const [showCodespaceModal, setShowCodespaceModal] = useState(true)
   const [terminalWidth, setTerminalWidth] = useState(720)
   const [isResizingTerminal, setIsResizingTerminal] = useState(false)
   const [scriptChangeEvent, setScriptChangeEvent] = useState(null) // Script change from WebSocket
+  const [lastTerminalActivity, setLastTerminalActivity] = useState(null) // Timestamp of last terminal output
+
+  // Terminal modal position and size (draggable/resizable)
+  const [terminalModalPos, setTerminalModalPos] = useState({ x: null, y: null }) // null = centered
+  const [terminalModalSize, setTerminalModalSize] = useState({ width: 900, height: 700 })
+  const [isDraggingTerminal, setIsDraggingTerminal] = useState(false)
+  const [isResizingTerminalModal, setIsResizingTerminalModal] = useState(false)
+  const [codespaceCollapsed, setCodespaceCollapsed] = useState(false)
+  const [terminalMinimizing, setTerminalMinimizing] = useState(false)
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [showSplitWorkspace, setShowSplitWorkspace] = useState(false)
 
   // Auth state - uses existing GitHub auth from CodespaceSync
   const [authStatus, setAuthStatus] = useState('checking') // 'checking', 'not_logged_in', 'denied', 'allowed', 'error'
@@ -154,6 +168,74 @@ function App() {
     document.addEventListener('mousemove', handleResizeMove)
     document.addEventListener('mouseup', handleResizeEnd)
   }, [])
+
+  // Terminal modal drag handler
+  const handleTerminalDragStart = useCallback((e) => {
+    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return
+    e.preventDefault()
+    setIsDraggingTerminal(true)
+    document.body.style.cursor = 'move'
+    document.body.style.userSelect = 'none'
+
+    const startX = e.clientX
+    const startY = e.clientY
+    const startPosX = terminalModalPos.x ?? (window.innerWidth - terminalModalSize.width) / 2
+    const startPosY = terminalModalPos.y ?? (window.innerHeight - terminalModalSize.height) / 2
+
+    const handleDragMove = (e) => {
+      const deltaX = e.clientX - startX
+      const deltaY = e.clientY - startY
+      setTerminalModalPos({
+        x: Math.max(0, Math.min(window.innerWidth - 100, startPosX + deltaX)),
+        y: Math.max(0, Math.min(window.innerHeight - 100, startPosY + deltaY))
+      })
+    }
+
+    const handleDragEnd = () => {
+      setIsDraggingTerminal(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleDragMove)
+      document.removeEventListener('mouseup', handleDragEnd)
+    }
+
+    document.addEventListener('mousemove', handleDragMove)
+    document.addEventListener('mouseup', handleDragEnd)
+  }, [terminalModalPos, terminalModalSize])
+
+  // Terminal modal resize handler (bottom-right corner)
+  const handleTerminalModalResizeStart = useCallback((e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsResizingTerminalModal(true)
+    document.body.style.cursor = 'se-resize'
+    document.body.style.userSelect = 'none'
+
+    const startX = e.clientX
+    const startY = e.clientY
+    const startWidth = terminalModalSize.width
+    const startHeight = terminalModalSize.height
+
+    const handleResizeMove = (e) => {
+      const deltaX = e.clientX - startX
+      const deltaY = e.clientY - startY
+      setTerminalModalSize({
+        width: Math.max(400, Math.min(window.innerWidth - 50, startWidth + deltaX)),
+        height: Math.max(300, Math.min(window.innerHeight - 50, startHeight + deltaY))
+      })
+    }
+
+    const handleResizeEnd = () => {
+      setIsResizingTerminalModal(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', handleResizeMove)
+      document.removeEventListener('mouseup', handleResizeEnd)
+    }
+
+    document.addEventListener('mousemove', handleResizeMove)
+    document.addEventListener('mouseup', handleResizeEnd)
+  }, [terminalModalSize])
 
   // Check auth on mount - uses existing GitHub auth from github.js
   useEffect(() => {
@@ -579,6 +661,35 @@ function App() {
     }
   }
 
+  // Create new folder in project root
+  const handleCreateNewFolder = async () => {
+    if (!projectPath || !canWrite || !newFolderName.trim()) return
+
+    setCreatingFolder(true)
+    try {
+      const res = await fetch('/api/fs/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: projectPath,
+          name: newFolderName.trim()
+        })
+      })
+      if (res.ok) {
+        setNewFolderName('')
+        setShowNewFolderModal(false)
+        await handleRefresh()
+      } else {
+        const errData = await res.json()
+        console.error('Failed to create folder:', errData.detail)
+      }
+    } catch (err) {
+      console.error('Failed to create folder:', err)
+    } finally {
+      setCreatingFolder(false)
+    }
+  }
+
   // Pull scripts from codespace
   const handlePullScripts = async () => {
     if (!syncConnection.syncUrl || !projectPath || isPulling) return
@@ -758,37 +869,8 @@ function App() {
               {showPreview ? '' : (selectedFile?.name || 'No file selected')}
             </span>
           </div>
-          <div className="top-bar-section top-bar-right" style={{ width: terminalCollapsed ? 'auto' : terminalWidth }}>
-            <span className="top-bar-title">Virtual Terminal</span>
-            <div className="codespace-status">
-              <span className={`status-dot ${syncConnection.isConnected ? 'connected' : ''}`}></span>
-              <span className="status-text">
-                {syncConnection.isConnected ? 'Connected' : 'Not connected'}
-              </span>
-            </div>
-            <button
-              className="btn-flat"
-              onClick={() => setShowCodespaceModal(true)}
-            >
-              Codespace
-            </button>
-            <button
-              className="btn-flat"
-              onClick={() => setTerminalCollapsed(!terminalCollapsed)}
-            >
-              {terminalCollapsed ? 'Expand' : 'Collapse'}
-            </button>
-            {showTerminal && !terminalCollapsed && syncConnection.syncUrl && (
-              <button
-                className="btn-flat"
-                onClick={() => {
-                  setShowTerminal(false)
-                  setTimeout(() => setShowTerminal(true), 100)
-                }}
-              >
-                Relaunch
-              </button>
-            )}
+          <div className="top-bar-section top-bar-right">
+            {/* Reserved for future controls */}
           </div>
         </div>
       )}
@@ -945,63 +1027,84 @@ function App() {
                 folderName={folderName}
                 height={scriptRunnerHeight}
                 scriptChangeEvent={scriptChangeEvent}
+                lastTerminalActivity={lastTerminalActivity}
               />
             </>
           )}
         </div>
 
-        {/* Terminal Pane */}
-        {!terminalCollapsed && (
-          <div className={`terminal-pane ${isResizingTerminal ? 'resizing' : ''}`} style={{ width: terminalWidth }}>
-            <div className="terminal-resize-handle" onMouseDown={handleTerminalResizeStart} />
-            {showTerminal && syncConnection.syncUrl ? (
-              <Terminal
-                syncUrl={syncConnection.syncUrl}
-                isConnected={syncConnection.isConnected}
-                autoLaunchClaude={true}
-              />
-            ) : (
-              <div className="terminal-launch-screen">
-                {syncConnection.syncUrl && !showCodespaceModal && (
+        {/* Terminal Pane - Embedded in main area, takes half the space */}
+        {projectPath && !terminalCollapsed && (
+          <>
+            <div
+              className="terminal-pane-resize-handle"
+              onMouseDown={handleTerminalResizeStart}
+            />
+            <div className="terminal-pane" style={{ width: terminalWidth }}>
+              {/* Codespace controls - collapsible with proper header */}
+              <div className={`terminal-codespace-section ${codespaceCollapsed ? 'collapsed' : ''}`}>
+                {/* Header bar - always visible */}
+                <div className="codespace-header" onClick={() => setCodespaceCollapsed(!codespaceCollapsed)}>
+                  <span className="codespace-header-title">Codespace</span>
                   <button
-                    className="btn-launch-claude"
-                    onClick={() => setShowTerminal(true)}
-                    disabled={!syncConnection.isConnected}
+                    className="codespace-toggle-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCodespaceCollapsed(!codespaceCollapsed)
+                    }}
                   >
-                    Launch Claude Code in Virtual Sandbox
+                    {codespaceCollapsed ? '+' : '−'}
                   </button>
+                </div>
+                {/* Content - always rendered but hidden when collapsed */}
+                <div className={`codespace-content ${codespaceCollapsed ? 'hidden' : ''}`}>
+                  <CodespaceSync
+                    projectPath={projectPath}
+                    currentConnection={syncConnection}
+                    minimized={codespaceCollapsed}
+                    onSyncComplete={() => {
+                      handleRefresh()
+                      if (activeTab === 'codespace') loadCodespaceFiles()
+                    }}
+                    onConnectionChange={(conn) => {
+                      setSyncConnection(conn)
+                    }}
+                    onLaunchClaude={() => {
+                      setShowTerminal(true)
+                    }}
+                    onAuthChange={handleAuthChange}
+                  />
+                </div>
+              </div>
+
+              <div className="terminal-pane-body">
+                {showTerminal && syncConnection.syncUrl ? (
+                  <Terminal
+                    syncUrl={syncConnection.syncUrl}
+                    isConnected={syncConnection.isConnected}
+                    autoLaunchClaude={true}
+                    onTerminalActivity={() => setLastTerminalActivity(Date.now())}
+                  />
+                ) : (
+                  <div className="terminal-launch-screen">
+                    {syncConnection.syncUrl && (
+                      <button
+                        className="btn-launch-claude"
+                        onClick={() => {
+                          setShowTerminal(true)
+                        }}
+                        disabled={!syncConnection.isConnected}
+                      >
+                        Launch Vibe Code
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-
-            {/* Codespace Modal - always render CodespaceSync to keep sync running */}
-            <div
-              className="codespace-modal-overlay"
-              style={{ display: showCodespaceModal ? 'flex' : 'none' }}
-              onClick={() => setShowCodespaceModal(false)}
-            >
-              <div className="codespace-modal" onClick={(e) => e.stopPropagation()}>
-                <button className="codespace-modal-close" onClick={() => setShowCodespaceModal(false)}>×</button>
-                <CodespaceSync
-                  projectPath={projectPath}
-                  currentConnection={syncConnection}
-                  onSyncComplete={() => {
-                    handleRefresh()
-                    if (activeTab === 'codespace') loadCodespaceFiles()
-                  }}
-                  onConnectionChange={(conn) => {
-                    setSyncConnection(conn)
-                  }}
-                  onLaunchClaude={() => {
-                    setShowTerminal(true)
-                    setShowCodespaceModal(false)
-                  }}
-                  onAuthChange={handleAuthChange}
-                />
-              </div>
             </div>
-          </div>
+          </>
         )}
+
       </div>
 
       {showBuildModal && (
@@ -1036,7 +1139,60 @@ function App() {
       {showFolderPicker && (
         <FolderPicker
           onSelect={handleFolderSelected}
-          onCancel={() => setShowFolderPicker(false)}
+          onCancel={projectPath ? () => setShowFolderPicker(false) : undefined}
+        />
+      )}
+
+      {showNewFolderModal && (
+        <div className="modal-overlay" onClick={() => !creatingFolder && setShowNewFolderModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>New Folder</h3>
+              <button className="modal-close" onClick={() => !creatingFolder && setShowNewFolderModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <p>Create a new folder in the project root:</p>
+              <input
+                type="text"
+                className="dialog-input"
+                placeholder="Folder name..."
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newFolderName.trim()) {
+                    handleCreateNewFolder()
+                  } else if (e.key === 'Escape') {
+                    setShowNewFolderModal(false)
+                    setNewFolderName('')
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => { setShowNewFolderModal(false); setNewFolderName('') }} disabled={creatingFolder}>
+                Cancel
+              </button>
+              <button className="btn-primary" onClick={handleCreateNewFolder} disabled={creatingFolder || !newFolderName.trim()}>
+                {creatingFolder ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Workspace - Preview + Terminal side by side */}
+      {showSplitWorkspace && (
+        <SplitWorkspace
+          projectPath={projectPath}
+          syncConnection={syncConnection}
+          onSyncConnectionChange={setSyncConnection}
+          onClose={() => setShowSplitWorkspace(false)}
+          onSyncComplete={() => {
+            handleRefresh()
+            if (activeTab === 'codespace') loadCodespaceFiles()
+          }}
+          onAuthChange={handleAuthChange}
         />
       )}
 

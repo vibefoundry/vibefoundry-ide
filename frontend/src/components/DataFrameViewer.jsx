@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom'
 import { List } from 'react-window'
 
 const ROW_HEIGHT = 32
-const CHUNK_SIZE = 200
+const CHUNK_SIZE = 1000
 const DEFAULT_COL_WIDTH = 120
 const ROW_NUM_WIDTH = 50
+const MAX_AUTO_LOAD = 1000  // Only auto-load up to this many rows
 
-// Memoized row component for react-window v2
+// Memoized row component for react-window
 const VirtualRow = memo(({ index, style, rows, columns, columnWidths, getColWidth, isCellSelected, handleCellMouseDown, handleCellMouseEnter }) => {
   const row = rows[index]
   if (!row) return <div style={style} />
@@ -42,7 +43,6 @@ const DataFrameViewer = ({ content }) => {
   const [rows, setRows] = useState(content.data || [])
   const [totalRows, setTotalRows] = useState(content.totalRows || content.data?.length || 0)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [loadedUpTo, setLoadedUpTo] = useState(content.data?.length || 0)
 
   // Filter/sort state
   const [filters, setFilters] = useState({})
@@ -66,8 +66,8 @@ const DataFrameViewer = ({ content }) => {
   const listRef = useRef(null)
   const [containerHeight, setContainerHeight] = useState(400)
 
-  // Get columnInfo from props (computed by backend)
-  const columnInfo = content.columnInfo || {}
+  // columnInfo state - initialized from props, updated by cascading filters
+  const [columnInfo, setColumnInfo] = useState(content.columnInfo || {})
   const columns = content.columns || []
   const filePath = content.filePath || ''
 
@@ -75,11 +75,12 @@ const DataFrameViewer = ({ content }) => {
   useEffect(() => {
     setRows(content.data || [])
     setTotalRows(content.totalRows || content.data?.length || 0)
-    setLoadedUpTo(content.data?.length || 0)
+    setIsLoadingMore(false)
     setFilters({})
     setSortConfig({ column: null, direction: 'asc' })
     setSelection(null)
     setColumnWidths({})
+    setColumnInfo(content.columnInfo || {})
   }, [content.filename])
 
   // Measure container height for virtual list
@@ -104,32 +105,30 @@ const DataFrameViewer = ({ content }) => {
     }
   }, [isFullscreen])
 
-  // Load more rows when scrolling near bottom
-  const handleRowsRendered = useCallback(async (visibleRows) => {
-    const { stopIndex } = visibleRows
-    if (isLoadingMore || !filePath) return
-    if (loadedUpTo >= totalRows) return
-    if (stopIndex < loadedUpTo - 50) return
+  // Manual load more rows - no automatic loading
+  const loadMoreRows = useCallback(async () => {
+    if (isLoadingMore || !filePath || rows.length >= totalRows) return
 
     setIsLoadingMore(true)
+
     try {
       const res = await fetch(
-        `/api/dataframe/rows?filePath=${encodeURIComponent(filePath)}&offset=${loadedUpTo}&limit=${CHUNK_SIZE}`
+        `/api/dataframe/rows?filePath=${encodeURIComponent(filePath)}&offset=${rows.length}&limit=${CHUNK_SIZE}`
       )
+
       if (res.ok) {
         const data = await res.json()
         if (data.data && data.data.length > 0) {
           setRows(prev => [...prev, ...data.data])
-          setLoadedUpTo(prev => prev + data.data.length)
           setTotalRows(data.totalRows)
         }
       }
     } catch (err) {
-      console.error('Failed to load more rows:', err)
+      console.error('Failed to load rows:', err)
     } finally {
       setIsLoadingMore(false)
     }
-  }, [isLoadingMore, loadedUpTo, totalRows, filePath])
+  }, [filePath, rows.length, totalRows, isLoadingMore])
 
   // Apply filter/sort via backend
   const applyFilterSort = useCallback(async (newFilters, newSort) => {
@@ -150,7 +149,10 @@ const DataFrameViewer = ({ content }) => {
         const data = await res.json()
         setRows(data.data)
         setTotalRows(data.totalRows)
-        setLoadedUpTo(data.data.length)
+        // Update columnInfo with cascading filter options
+        if (data.columnInfo) {
+          setColumnInfo(data.columnInfo)
+        }
         if (listRef.current) {
           listRef.current.scrollToRow({ index: 0 })
         }
@@ -508,7 +510,6 @@ const DataFrameViewer = ({ content }) => {
               handleCellMouseDown,
               handleCellMouseEnter
             }}
-            onRowsRendered={handleRowsRendered}
           />
         </div>
       </div>
@@ -518,7 +519,17 @@ const DataFrameViewer = ({ content }) => {
         <span className="status-left">
           {rows.length}{totalRows > rows.length ? ` of ${totalRows.toLocaleString()}` : ''} rows × {columns.length} cols
           {activeFilterCount > 0 && ` • ${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''}`}
-          {isLoadingMore && ' • Loading...'}
+        </span>
+        <span className="status-center">
+          {rows.length < totalRows && (
+            <button
+              className="load-more-btn"
+              onClick={loadMoreRows}
+              disabled={isLoadingMore}
+            >
+              {isLoadingMore ? 'Loading...' : `Load ${Math.min(CHUNK_SIZE, totalRows - rows.length).toLocaleString()} More Rows`}
+            </button>
+          )}
         </span>
         {selectionStats && selectionStats.numericCount > 0 && (
           <span className="status-right">

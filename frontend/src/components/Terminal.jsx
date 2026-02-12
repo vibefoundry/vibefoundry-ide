@@ -1,36 +1,44 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { CanvasAddon } from '@xterm/addon-canvas'
+import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-// Fixed terminal size - wider and taller for better Claude Code experience
-const FIXED_COLS = 80
-const FIXED_ROWS = 50
-const DEFAULT_FONT_SIZE = 14
-const MIN_FONT_SIZE = 10
-const MAX_FONT_SIZE = 24
+const FONT_SIZE = 14
+const MAX_RECONNECT_ATTEMPTS = 30 // Try for 30 seconds
+const RECONNECT_DELAY = 1000 // 1 second between attempts
 
-function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
+function Terminal({ syncUrl, isConnected, autoLaunchClaude = false, onTerminalActivity }) {
   const terminalRef = useRef(null)
   const xtermRef = useRef(null)
+  const fitAddonRef = useRef(null)
   const wsRef = useRef(null)
-  const [isTerminalConnected, setIsTerminalConnected] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState('waiting') // waiting, connecting, connected, error
   const hasLaunchedClaudeRef = useRef(false)
   const [contextMenu, setContextMenu] = useState(null)
-  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [restartKey, setRestartKey] = useState(0) // Increment to force terminal restart
+  const reconnectAttemptsRef = useRef(0)
+  const reconnectTimeoutRef = useRef(null)
 
   useEffect(() => {
-    if (!terminalRef.current || !isConnected || !syncUrl) return
+    if (!terminalRef.current || !syncUrl) return
 
-    // Create terminal with fixed size
+    // If sync server not connected yet, show waiting state
+    if (!isConnected) {
+      setConnectionStatus('waiting')
+      return
+    }
+
+    // Reset reconnect attempts on fresh connection
+    reconnectAttemptsRef.current = 0
+
+    // Create terminal - FitAddon will handle sizing
     const xterm = new XTerm({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontSize: 14,
+      fontSize: FONT_SIZE,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 1000,
-      cols: FIXED_COLS,
-      rows: FIXED_ROWS,
       scrollSensitivity: 1,
       theme: {
         background: '#ffffff',
@@ -56,6 +64,11 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
       }
     })
 
+    // Load FitAddon first so we can fit before opening
+    const fitAddon = new FitAddon()
+    xterm.loadAddon(fitAddon)
+    fitAddonRef.current = fitAddon
+
     xterm.open(terminalRef.current)
     xtermRef.current = xterm
 
@@ -66,6 +79,36 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     } catch (e) {
       console.warn('Canvas addon failed to load:', e)
     }
+
+    // Helper to fit and notify server
+    const doFit = () => {
+      fitAddon.fit()
+
+      // Send new size to server
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'resize',
+          cols: xterm.cols,
+          rows: xterm.rows
+        }))
+      }
+    }
+
+    // Use ResizeObserver to detect container size changes (more reliable than window resize)
+    let resizeObserver = null
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        doFit()
+      })
+      resizeObserver.observe(terminalRef.current)
+    }
+
+    // Also listen for window resize as fallback
+    const handleResize = () => doFit()
+    window.addEventListener('resize', handleResize)
+
+    // Initial fit after a short delay to ensure container is properly sized
+    setTimeout(() => doFit(), 100)
 
     // Handle keyboard shortcuts
     xterm.attachCustomKeyEventHandler((event) => {
@@ -89,27 +132,6 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
         return false // Prevent xterm from handling it
       }
 
-      // Ctrl/Cmd + Plus: zoom in
-      if ((event.ctrlKey || event.metaKey) && (event.key === '=' || event.key === '+') && event.type === 'keydown') {
-        event.preventDefault()
-        setFontSize(prev => Math.min(prev + 1, MAX_FONT_SIZE))
-        return false
-      }
-
-      // Ctrl/Cmd + Minus: zoom out
-      if ((event.ctrlKey || event.metaKey) && event.key === '-' && event.type === 'keydown') {
-        event.preventDefault()
-        setFontSize(prev => Math.max(prev - 1, MIN_FONT_SIZE))
-        return false
-      }
-
-      // Ctrl/Cmd + 0: reset zoom
-      if ((event.ctrlKey || event.metaKey) && event.key === '0' && event.type === 'keydown') {
-        event.preventDefault()
-        setFontSize(DEFAULT_FONT_SIZE)
-        return false
-      }
-
       return true // Let xterm handle other keys
     })
 
@@ -124,78 +146,101 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     }
     terminalRef.current.addEventListener('contextmenu', handleContextMenu)
 
-    // Connect WebSocket
-    const wsUrl = syncUrl.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
-
     // Keepalive ping interval
     let pingInterval = null
+    let isMounted = true
 
-    ws.onopen = () => {
-      setIsTerminalConnected(true)
-      xterm.clear()
-      ws.send(JSON.stringify({ type: 'resize', cols: FIXED_COLS, rows: FIXED_ROWS }))
+    // Connect WebSocket with retry logic
+    const connectWebSocket = () => {
+      if (!isMounted) return
 
-      // Start keepalive ping every 25 seconds
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' }))
-        }
-      }, 25000)
+      setConnectionStatus('connecting')
+      const wsUrl = syncUrl.replace('https://', 'wss://').replace('http://', 'ws://') + '/terminal'
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
 
-      // Auto-launch Claude Code if requested and not already launched
-      if (autoLaunchClaude && !hasLaunchedClaudeRef.current) {
-        hasLaunchedClaudeRef.current = true
-        setTimeout(() => {
+      ws.onopen = () => {
+        if (!isMounted) return
+        reconnectAttemptsRef.current = 0
+        setConnectionStatus('connected')
+        xterm.clear()
+        // Send current fitted dimensions
+        ws.send(JSON.stringify({ type: 'resize', cols: xterm.cols, rows: xterm.rows }))
+
+        // Start keepalive ping every 25 seconds
+        pingInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send('claude\n')
+            ws.send(JSON.stringify({ type: 'ping' }))
           }
-        }, 500)
+        }, 25000)
+
+        // Auto-launch Claude Code if requested and not already launched
+        if (autoLaunchClaude && !hasLaunchedClaudeRef.current) {
+          hasLaunchedClaudeRef.current = true
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send('claude\n')
+            }
+          }, 500)
+        }
+      }
+
+      ws.onmessage = (event) => {
+        // Skip pong messages from keepalive
+        if (event.data === '{"type":"pong"}') return
+        xterm.write(event.data)
+        // Report activity to parent (for detecting when Claude stops streaming)
+        if (onTerminalActivity) onTerminalActivity()
+      }
+
+      ws.onclose = () => {
+        if (!isMounted) return
+        hasLaunchedClaudeRef.current = false
+        if (pingInterval) {
+          clearInterval(pingInterval)
+          pingInterval = null
+        }
+
+        // Try to reconnect if we haven't exceeded max attempts
+        if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS && isConnected) {
+          reconnectAttemptsRef.current++
+          setConnectionStatus('connecting')
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, RECONNECT_DELAY)
+        } else {
+          setConnectionStatus('error')
+          xterm.writeln('\r\n\x1b[33mTerminal disconnected. Click "Restart Virtual Terminal" to reconnect.\x1b[0m')
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error)
+        // onclose will handle reconnection
       }
     }
 
-    ws.onmessage = (event) => {
-      // Skip pong messages from keepalive
-      if (event.data === '{"type":"pong"}') return
-      xterm.write(event.data)
-    }
-
-    ws.onclose = () => {
-      setIsTerminalConnected(false)
-      hasLaunchedClaudeRef.current = false  // Reset so next launch will auto-run claude
-      if (pingInterval) clearInterval(pingInterval)
-      xterm.writeln('\r\n\x1b[31mConnection closed\x1b[0m')
-    }
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-      xterm.writeln('\r\n\x1b[31mConnection error\x1b[0m')
-    }
+    // Start connection
+    connectWebSocket()
 
     // Handle keyboard input
     const inputDisposable = xterm.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data)
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(data)
       }
     })
 
     const terminalElement = terminalRef.current
     return () => {
+      isMounted = false
       if (pingInterval) clearInterval(pingInterval)
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
       inputDisposable.dispose()
       terminalElement?.removeEventListener('contextmenu', handleContextMenu)
-      ws.close()
+      window.removeEventListener('resize', handleResize)
+      if (resizeObserver) resizeObserver.disconnect()
+      if (wsRef.current) wsRef.current.close()
       xterm.dispose()
     }
-  }, [syncUrl, isConnected])
-
-  // Update terminal font size when it changes
-  useEffect(() => {
-    if (xtermRef.current) {
-      xtermRef.current.options.fontSize = fontSize
-    }
-  }, [fontSize])
+  }, [syncUrl, isConnected, restartKey])
 
   // Close context menu when clicking elsewhere
   useEffect(() => {
@@ -222,28 +267,50 @@ function Terminal({ syncUrl, isConnected, autoLaunchClaude = false }) {
     setContextMenu(null)
   }
 
-  if (!isConnected) {
-    return null
+  // Restart terminal and launch Claude
+  const handleRestart = useCallback(() => {
+    hasLaunchedClaudeRef.current = false
+    reconnectAttemptsRef.current = 0
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
+    setRestartKey(prev => prev + 1)
+  }, [])
+
+  // Get status text and dot class
+  const getStatusDisplay = () => {
+    switch (connectionStatus) {
+      case 'waiting':
+        return { text: 'Waiting for codespace...', dotClass: '' }
+      case 'connecting':
+        return { text: 'Connecting terminal...', dotClass: '' }
+      case 'connected':
+        return { text: 'Connected', dotClass: 'connected' }
+      case 'error':
+        return { text: 'Disconnected', dotClass: 'error' }
+      default:
+        return { text: 'Unknown', dotClass: '' }
+    }
   }
 
-  const handleZoomIn = () => setFontSize(prev => Math.min(prev + 1, MAX_FONT_SIZE))
-  const handleZoomOut = () => setFontSize(prev => Math.max(prev - 1, MIN_FONT_SIZE))
-  const handleZoomReset = () => setFontSize(DEFAULT_FONT_SIZE)
+  const { text: statusText, dotClass } = getStatusDisplay()
 
   return (
     <>
       <div className="terminal-toolbar">
         <div className="terminal-status">
-          <span className={`terminal-dot ${isTerminalConnected ? 'connected' : ''}`}></span>
-          <span>{isTerminalConnected ? 'Connected' : 'Connecting...'}</span>
+          <span className={`terminal-dot ${dotClass}`}></span>
+          <span>{statusText}</span>
         </div>
-        <div className="terminal-zoom-controls">
-          <button onClick={handleZoomOut} title="Zoom out (Ctrl -)">−</button>
-          <span className="zoom-level" onClick={handleZoomReset} title="Reset zoom (Ctrl 0)">{fontSize}px</span>
-          <button onClick={handleZoomIn} title="Zoom in (Ctrl +)">+</button>
-        </div>
+        <button className="terminal-restart-btn" onClick={handleRestart} disabled={connectionStatus === 'waiting'}>
+          Restart Virtual Terminal
+        </button>
       </div>
-      <div className="terminal-body" ref={terminalRef}></div>
+      <div className="terminal-body" ref={terminalRef}>
+        {connectionStatus === 'waiting' && (
+          <div className="terminal-waiting-message">
+            Waiting for codespace to be ready...
+          </div>
+        )}
+      </div>
 
       {contextMenu && (
         <div

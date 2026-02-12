@@ -8,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1100;
 }
 
 .folder-picker-modal {
@@ -193,4 +193,26 @@
 .folder-picker-modal .modal-close:hover {
   background: var(--color-bg-subtle);
   color: var(--color-text);
+}
+
+/* New folder input row */
+.folder-picker-new-folder {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--color-bg-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.folder-picker-new-folder .folder-picker-path-input {
+  flex: 1;
+}
+
+.folder-picker-new-folder .btn-primary {
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.folder-picker-new-folder .btn-flat {
+  padding: 8px 12px;
 }

@@ -4,9 +4,13 @@ Script discovery and execution
 
 import sys
 import subprocess
+import signal
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+
+# Track running processes for stop functionality
+running_processes: list[subprocess.Popen] = []
 
 
 @dataclass
@@ -59,24 +63,37 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
             error=f"Script not found: {script_path}"
         )
 
+    process = None
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [sys.executable, str(script_path)],
             cwd=str(project_folder),
-            capture_output=True,
-            text=True,
-            timeout=timeout
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
+        running_processes.append(process)
+
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        finally:
+            if process in running_processes:
+                running_processes.remove(process)
 
         return ScriptResult(
             script_path=str(script_path),
-            success=result.returncode == 0,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            return_code=result.returncode
+            success=process.returncode == 0,
+            stdout=stdout,
+            stderr=stderr,
+            return_code=process.returncode
         )
 
     except subprocess.TimeoutExpired:
+        if process:
+            process.kill()
+            process.communicate()  # Clean up
+            if process in running_processes:
+                running_processes.remove(process)
         return ScriptResult(
             script_path=str(script_path),
             success=False,
@@ -88,6 +105,8 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
         )
 
     except Exception as e:
+        if process and process in running_processes:
+            running_processes.remove(process)
         return ScriptResult(
             script_path=str(script_path),
             success=False,
@@ -96,6 +115,30 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
             return_code=-1,
             error=str(e)
         )
+
+
+def stop_all_scripts() -> int:
+    """
+    Stop all currently running scripts.
+
+    Returns:
+        Number of processes that were stopped
+    """
+    stopped = 0
+    for process in running_processes[:]:  # Copy list to avoid modification during iteration
+        try:
+            process.terminate()  # Try graceful termination first
+            try:
+                process.wait(timeout=2)  # Wait up to 2 seconds
+            except subprocess.TimeoutExpired:
+                process.kill()  # Force kill if still running
+            stopped += 1
+        except Exception:
+            pass  # Process may have already exited
+        finally:
+            if process in running_processes:
+                running_processes.remove(process)
+    return stopped
 
 
 def setup_project_structure(project_folder: Path) -> dict[str, Path]:

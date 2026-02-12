@@ -8,6 +8,9 @@ function FolderPicker({ onSelect, onCancel }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [inputPath, setInputPath] = useState('')
+  const [showNewFolder, setShowNewFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [creatingFolder, setCreatingFolder] = useState(false)
 
   // Load home directory on mount
   useEffect(() => {
@@ -69,12 +72,39 @@ function FolderPicker({ onSelect, onCancel }) {
     onSelect(currentPath)
   }
 
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return
+    setCreatingFolder(true)
+    try {
+      const res = await fetch('/api/fs/mkdir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: currentPath,
+          name: newFolderName.trim()
+        })
+      })
+      if (res.ok) {
+        setNewFolderName('')
+        setShowNewFolder(false)
+        loadDirectory(currentPath) // Refresh the list
+      } else {
+        const errData = await res.json()
+        setError(errData.detail || 'Failed to create folder')
+      }
+    } catch (err) {
+      setError('Failed to create folder')
+    } finally {
+      setCreatingFolder(false)
+    }
+  }
+
   return (
-    <div className="folder-picker-overlay" onClick={onCancel}>
+    <div className="folder-picker-overlay" onClick={onCancel || undefined}>
       <div className="folder-picker-modal" onClick={e => e.stopPropagation()}>
         <div className="folder-picker-header">
           <h3>Select Project Folder</h3>
-          <button className="modal-close" onClick={onCancel}>×</button>
+          {onCancel && <button className="modal-close" onClick={onCancel}>×</button>}
         </div>
 
         <form className="folder-picker-path-form" onSubmit={handlePathSubmit}>
@@ -86,7 +116,50 @@ function FolderPicker({ onSelect, onCancel }) {
             placeholder="Enter path..."
           />
           <button type="submit" className="btn-flat">Go</button>
+          <button type="button" className="btn-flat" onClick={() => setShowNewFolder(!showNewFolder)}>
+            + New Folder
+          </button>
         </form>
+
+        {showNewFolder && (
+          <div className="folder-picker-new-folder">
+            <input
+              type="text"
+              className="folder-picker-path-input"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="New folder name..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleCreateFolder()
+                } else if (e.key === 'Escape') {
+                  setShowNewFolder(false)
+                  setNewFolderName('')
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleCreateFolder}
+              disabled={creatingFolder || !newFolderName.trim()}
+            >
+              {creatingFolder ? 'Creating...' : 'Create'}
+            </button>
+            <button
+              type="button"
+              className="btn-flat"
+              onClick={() => {
+                setShowNewFolder(false)
+                setNewFolderName('')
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         <div className="folder-picker-list">
           {loading ? (
@@ -128,7 +201,7 @@ function FolderPicker({ onSelect, onCancel }) {
             {currentPath}
           </div>
           <div className="folder-picker-actions">
-            <button className="btn-secondary" onClick={onCancel}>Cancel</button>
+            {onCancel && <button className="btn-secondary" onClick={onCancel}>Cancel</button>}
             <button className="btn-primary" onClick={handleSelect} disabled={!currentPath}>
               Select This Folder
             </button>

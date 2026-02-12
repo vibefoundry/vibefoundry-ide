@@ -21,7 +21,7 @@ import {
   resetCodespace
 } from '../utils/codespaceSync'
 
-function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection, onAuthChange, onLaunchClaude }) {
+function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, currentConnection, onAuthChange, onLaunchClaude, minimized = false }) {
   // Auth state
   const [token, setToken] = useState(getStoredToken())
   const [user, setUser] = useState(getStoredUser())
@@ -43,11 +43,12 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
   const [syncUrl, setSyncUrl] = useState(currentConnection?.syncUrl || null)
   const [isConnected, setIsConnected] = useState(currentConnection?.isConnected || false)
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isStartingUp, setIsStartingUp] = useState(false) // True when codespace is being created/started
   const [isSyncing, setIsSyncing] = useState(false)
   const [isPushing, setIsPushing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('idle') // idle, syncing, success, error
   const [syncMessage, setSyncMessage] = useState('')
-  const [autoSync, setAutoSync] = useState(true)
+  const [autoSync, setAutoSync] = useState(false)
   const [lastSync, setLastSync] = useState({})
 
   // Refs
@@ -246,7 +247,8 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     if (!syncUrl) return
     const connected = await checkSyncServer(syncUrl)
     setIsConnected(connected)
-    if (!connected) {
+    if (!connected && !isStartingUp && !isLaunchingCodespace) {
+      // Only show disconnected message if we're not in a starting state
       setSyncStatus('idle')
       setSyncMessage('Codespace not running or sync server offline')
     }
@@ -353,7 +355,9 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
   const handleCreateCodespace = async () => {
     console.log('Creating codespace...')
     setIsCreatingCodespace(true)
+    setIsStartingUp(true)
     setSyncMessage('Creating codespace...')
+    setSyncStatus('syncing')
     try {
       const newCodespace = await createCodespace(token)
       console.log('Codespace created:', newCodespace)
@@ -366,13 +370,39 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
       const codespaceUrl = `https://${newCodespace.name}.github.dev`
       window.open(codespaceUrl, '_blank')
 
-      setSyncMessage('Codespace created! Launching in new tab...')
+      setSyncMessage('Codespace created! Starting up (this may take a few minutes)...')
 
-      // Refresh list in background to get updated state
-      loadCodespaces()
+      // Poll for sync server to respond - codespace creation can take a while
+      const pollForReady = async (attempts = 0) => {
+        if (attempts > 300) { // Max 5 minutes at 1 second intervals
+          setIsStartingUp(false)
+          setSyncMessage('Codespace is still starting. Check the browser tab.')
+          setSyncStatus('idle')
+          return
+        }
+
+        const connected = await checkSyncServer(syncUrl || getCodespaceSyncUrl(newCodespace))
+
+        if (connected) {
+          setIsConnected(true)
+          setIsStartingUp(false)
+          setSyncMessage('Connected!')
+          setSyncStatus('success')
+          loadCodespaces()
+        } else {
+          const mins = Math.floor(attempts / 60)
+          const secs = attempts % 60
+          setSyncMessage(`Starting codespace... ${mins > 0 ? `${mins}m ` : ''}${secs}s`)
+          setTimeout(() => pollForReady(attempts + 1), 1000)
+        }
+      }
+
+      setTimeout(() => pollForReady(0), 2000)
     } catch (err) {
       console.error('Failed to create codespace:', err)
       setSyncMessage('Failed to create codespace: ' + err.message)
+      setSyncStatus('error')
+      setIsStartingUp(false)
     } finally {
       setIsCreatingCodespace(false)
     }
@@ -628,6 +658,52 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
     )
   }
 
+  // Minimized view - just sync controls
+  if (minimized && isConnected) {
+    return (
+      <div className="codespace-sync codespace-sync-minimized">
+        <div className="sync-status-inline">
+          <span className="sync-dot connected"></span>
+          <span>Connected</span>
+        </div>
+        <div className="sync-controls-inline">
+          <label className="sync-auto-label">
+            <input
+              type="checkbox"
+              checked={autoSync}
+              onChange={(e) => setAutoSync(e.target.checked)}
+            />
+            Auto
+          </label>
+          <button
+            className="btn-small"
+            onClick={handleSync}
+            disabled={isSyncing}
+          >
+            {isSyncing ? 'Syncing...' : 'Sync Now'}
+          </button>
+          <button
+            className="btn-small"
+            onClick={handlePushScripts}
+            disabled={isPushing}
+          >
+            {isPushing ? 'Pulling...' : 'Pull Scripts'}
+          </button>
+          <button
+            className="btn-small btn-warning"
+            onClick={handleResetCodespace}
+            disabled={isResettingCodespace}
+          >
+            {isResettingCodespace ? 'Resetting...' : 'Reset'}
+          </button>
+        </div>
+        {syncMessage && (
+          <span className={`sync-status-message ${syncStatus}`}>{syncMessage}</span>
+        )}
+      </div>
+    )
+  }
+
   // Logged in - show codespace selector and sync
   return (
     <div className="codespace-sync">
@@ -679,7 +755,10 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           {selectedCodespace && (
             <button
               className="btn-small"
-              onClick={handleLaunchCodespace}
+              onClick={() => {
+                handleLaunchCodespace()
+                if (onLaunchClaude) onLaunchClaude()
+              }}
               disabled={isLaunchingCodespace}
             >
               {isLaunchingCodespace ? 'Launching...' : 'Launch'}
@@ -702,15 +781,17 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
         <div className="sync-section">
           <div className="sync-label">Sync Status</div>
           <div className="sync-status-row">
-            <div className={`sync-dot ${isConnected ? 'connected' : 'disconnected'}`}></div>
+            <div className={`sync-dot ${isConnected ? 'connected' : (isStartingUp || isLaunchingCodespace) ? 'starting' : 'disconnected'}`}></div>
             <span className="sync-status-text">
               {isConnected
                 ? 'Connected'
-                : isLaunchingCodespace
-                  ? 'Starting...'
-                  : selectedCodespace.state !== 'Available'
-                    ? 'Codespace Stopped'
-                    : 'Waiting for sync server...'}
+                : isStartingUp
+                  ? 'Starting codespace...'
+                  : isLaunchingCodespace
+                    ? 'Starting...'
+                    : selectedCodespace.state !== 'Available'
+                      ? 'Codespace Stopped'
+                      : 'Waiting for sync server...'}
             </span>
           </div>
           {!isConnected && !isLaunchingCodespace && (
@@ -723,7 +804,13 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
           {isLaunchingCodespace && (
             <div className="sync-message syncing">
               <span className="spinner-small"></span>
-              Codespace is starting up... Hang tight!
+              Codespace is starting up...
+              <button
+                className="btn-cancel-launch"
+                onClick={() => setIsLaunchingCodespace(false)}
+              >
+                Cancel
+              </button>
             </div>
           )}
           {isConnected && syncMessage && (
@@ -754,23 +841,15 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
                 onClick={handlePushScripts}
                 disabled={isPushing}
               >
-                {isPushing ? 'Pushing...' : 'Push Scripts'}
+                {isPushing ? 'Pulling...' : 'Pull Scripts'}
               </button>
               <button
                 className="btn-small btn-warning"
                 onClick={handleResetCodespace}
                 disabled={isResettingCodespace}
               >
-                {isResettingCodespace ? 'Resetting...' : 'Reset Codespace'}
+                {isResettingCodespace ? 'Resetting...' : 'Reset'}
               </button>
-              {onLaunchClaude && (
-                <button
-                  className="btn-small btn-primary"
-                  onClick={onLaunchClaude}
-                >
-                  Launch Claude Code
-                </button>
-              )}
             </div>
           )}
         </div>

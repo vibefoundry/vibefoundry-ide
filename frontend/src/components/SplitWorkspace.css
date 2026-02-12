@@ -1,0 +1,215 @@
+/* Split Workspace - Full screen overlay with preview + terminal side by side */
+
+.split-workspace-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.split-workspace {
+  width: 95vw;
+  height: 90vh;
+  background: var(--color-bg);
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.split-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--color-bg-alt);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.split-workspace-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.split-workspace-close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  font-size: 20px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.split-workspace-close:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+.split-workspace-content {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.split-workspace-content.dragging {
+  cursor: col-resize;
+}
+
+.split-workspace-content.dragging iframe {
+  pointer-events: none;
+}
+
+/* Split panes */
+.split-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  overflow: hidden;
+}
+
+.split-pane-left {
+  border-right: 1px solid var(--color-border);
+}
+
+.split-pane-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--color-bg-alt);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.split-pane-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Preview section */
+.split-pane-body .preview-url-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+.split-pane-body .preview-url-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.split-pane-body .preview-url-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.split-preview-iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+.split-pane-body .preview-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  background: var(--color-bg-subtle);
+}
+
+/* Resize handle */
+.split-resize-handle {
+  width: 6px;
+  background: var(--color-border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.split-resize-handle:hover {
+  background: var(--color-accent);
+}
+
+/* Terminal section (right pane) */
+.split-codespace-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(to bottom, var(--color-bg-subtle), var(--color-bg));
+  flex-shrink: 0;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.split-codespace-section.minimized {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-height: none;
+  overflow: visible;
+}
+
+.split-codespace-section.minimized .codespace-sync-minimized {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.split-terminal-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px;
+  min-height: 0;
+}
+
+.split-terminal-body .terminal-launch-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+}
+
+.split-terminal-body .terminal-launch-message {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  text-align: center;
+}

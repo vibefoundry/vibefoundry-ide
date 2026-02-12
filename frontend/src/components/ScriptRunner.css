@@ -81,6 +81,16 @@
   cursor: not-allowed;
 }
 
+.btn-header.btn-stop:not(:disabled) {
+  border-color: #dc3545;
+  color: #dc3545;
+}
+
+.btn-header.btn-stop:not(:disabled):hover {
+  background: #dc3545;
+  color: white;
+}
+
 .auto-run-label {
   display: flex;
   align-items: center;
@@ -353,7 +363,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1100;
 }
 
 .install-modal {
@@ -439,7 +449,7 @@
   cursor: not-allowed;
 }
 
-/* Pending Scripts Modal */
+/* Pending Scripts Modal - shows when Claude finishes editing */
 .pending-modal-overlay {
   position: fixed;
   top: 0;
@@ -450,7 +460,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 1100;
 }
 
 .pending-modal {
@@ -464,11 +474,32 @@
   text-align: center;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.pending-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.pending-modal-close:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
 }
 
 .pending-modal-icon {
   font-size: 48px;
   margin-bottom: 12px;
+  color: #22c55e;
 }
 
 .pending-modal h3 {

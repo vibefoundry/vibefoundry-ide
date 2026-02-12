@@ -4,7 +4,7 @@ import './ScriptRunner.css'
 
 let terminalIdCounter = 1
 
-function ScriptRunner({ folderName, height, scriptChangeEvent }) {
+function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActivity }) {
   const [activeTab, setActiveTab] = useState('scripts') // 'scripts' or 'terminal'
   const [terminals, setTerminals] = useState([{ id: terminalIdCounter }])
   const [activeTerminalId, setActiveTerminalId] = useState(terminalIdCounter)
@@ -12,9 +12,9 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
   const [selectedScripts, setSelectedScripts] = useState(new Set())
   const [isRunning, setIsRunning] = useState(false)
   const [output, setOutput] = useState([])
-  const [pendingScripts, setPendingScripts] = useState([]) // Scripts awaiting approval
+  const [pendingScripts, setPendingScripts] = useState([]) // Scripts edited, shown in modal when done
   const [showPendingModal, setShowPendingModal] = useState(false)
-  const [checkedPendingScripts, setCheckedPendingScripts] = useState(new Set()) // Which pending scripts are checked
+  const [checkedPendingScripts, setCheckedPendingScripts] = useState(new Set())
   const [collapsed, setCollapsed] = useState(false)
   const [scriptsWidth, setScriptsWidth] = useState(200)
   const [isResizingScripts, setIsResizingScripts] = useState(false)
@@ -22,9 +22,10 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
   const [isInstalling, setIsInstalling] = useState(false)
   const outputRef = useRef(null)
   const scriptsResizeRef = useRef(null)
-  const scriptChangeDebounceRef = useRef(null)
   const scriptQueueRef = useRef([])
   const isRunningRef = useRef(false)
+  const hasCompletedInitialLoadRef = useRef(false) // Only show banner after first successful load + settle
+  const bannerTimeoutRef = useRef(null) // For auto-dismissing the banner
 
   // Fetch scripts list
   const fetchScripts = useCallback(async () => {
@@ -33,6 +34,14 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
       if (res.ok) {
         const data = await res.json()
         setScripts(data.scripts || [])
+
+        // After first successful fetch, wait 2 seconds then enable modal
+        if (!hasCompletedInitialLoadRef.current) {
+          setTimeout(() => {
+            hasCompletedInitialLoadRef.current = true
+            console.log('[ScriptRunner] Initial load complete, now listening for script changes')
+          }, 2000)
+        }
       }
     } catch (err) {
       console.error('Failed to fetch scripts:', err)
@@ -46,32 +55,82 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
     }
   }, [folderName, fetchScripts])
 
+
+  // Track last processed events to prevent duplicates (path -> timestamp)
+  const lastProcessedEventsRef = useRef({})
+
   // Handle script change events from App.jsx (single WebSocket connection)
+  // Uses a banner that accumulates changes and auto-dismisses after inactivity
   useEffect(() => {
     if (!scriptChangeEvent) return
 
+    // Skip until initial load is complete - prevents banner appearing before app is ready
+    if (!hasCompletedInitialLoadRef.current) {
+      console.log('[ScriptRunner] Ignoring script change during initial load:', scriptChangeEvent.path)
+      return
+    }
+
     const scriptPath = scriptChangeEvent.path
+    // Normalize path for case-insensitive comparison (Windows)
+    const normalizedPath = scriptPath.toLowerCase()
+    const now = Date.now()
+
+    // Skip if we already processed this path within 1 second (tighter debounce for banner)
+    const lastTime = lastProcessedEventsRef.current[normalizedPath]
+    if (lastTime && (now - lastTime) < 1000) {
+      return
+    }
+    lastProcessedEventsRef.current[normalizedPath] = now
+
+    // Clean up old entries
+    const cutoff = now - 10000
+    for (const key of Object.keys(lastProcessedEventsRef.current)) {
+      if (lastProcessedEventsRef.current[key] < cutoff) {
+        delete lastProcessedEventsRef.current[key]
+      }
+    }
 
     // Refresh scripts list
     fetchScripts()
 
-    // Add to pending scripts modal (avoid duplicates, auto-check new scripts)
+    // Accumulate scripts silently (modal shows when terminal goes idle)
     setPendingScripts(prev => {
       if (prev.includes(scriptPath)) return prev
       return [...prev, scriptPath]
     })
+    // Auto-check new scripts
     setCheckedPendingScripts(prev => {
       const next = new Set(prev)
       next.add(scriptPath)
       return next
     })
-
-    // Debounce showing modal to batch rapid changes
-    if (scriptChangeDebounceRef.current) clearTimeout(scriptChangeDebounceRef.current)
-    scriptChangeDebounceRef.current = setTimeout(() => {
-      setShowPendingModal(true)
-    }, 500)
   }, [scriptChangeEvent, fetchScripts])
+
+  // Watch terminal activity - show modal when terminal goes idle for 2 seconds
+  useEffect(() => {
+    // Only run if we have pending scripts and terminal activity data
+    if (pendingScripts.length === 0 || !lastTerminalActivity || showPendingModal) return
+
+    // Check every 500ms if terminal has been idle for 2 seconds
+    const checkIdle = () => {
+      const now = Date.now()
+      const idleTime = now - lastTerminalActivity
+      if (idleTime >= 2000) {
+        // Terminal has been idle for 2 seconds - Claude is done, show modal
+        setShowPendingModal(true)
+      }
+    }
+
+    const intervalId = setInterval(checkIdle, 500)
+    return () => clearInterval(intervalId)
+  }, [pendingScripts.length, lastTerminalActivity, showPendingModal])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (bannerTimeoutRef.current) clearTimeout(bannerTimeoutRef.current)
+    }
+  }, [])
 
   // Auto-scroll output
   useEffect(() => {
@@ -255,6 +314,22 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
     runScripts(selected)
   }
 
+  const handleStop = async () => {
+    try {
+      const res = await fetch('/api/scripts/stop', { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        addOutput(`⏹ Stopped ${data.stopped} running script(s)`, 'warning')
+        // Clear the queue and reset running state
+        scriptQueueRef.current = []
+        isRunningRef.current = false
+        setIsRunning(false)
+      }
+    } catch (err) {
+      addOutput(`Stop error: ${err.message}`, 'error')
+    }
+  }
+
   const handleRefreshMetadata = async () => {
     try {
       const res = await fetch('/api/metadata/generate', { method: 'POST' })
@@ -270,8 +345,8 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
     setOutput([])
   }
 
-  // Approve and run checked pending scripts
-  const handleApprovePending = () => {
+  // Run checked pending scripts from modal
+  const handleApprovePending = useCallback(() => {
     const scriptsToRun = pendingScripts.filter(p => checkedPendingScripts.has(p))
     if (scriptsToRun.length > 0) {
       queueScripts(scriptsToRun)
@@ -279,14 +354,14 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
     setPendingScripts([])
     setCheckedPendingScripts(new Set())
     setShowPendingModal(false)
-  }
+  }, [pendingScripts, checkedPendingScripts])
 
-  // Dismiss pending scripts
-  const handleDismissPending = () => {
+  // Dismiss the modal
+  const handleDismissPending = useCallback(() => {
     setPendingScripts([])
     setCheckedPendingScripts(new Set())
     setShowPendingModal(false)
-  }
+  }, [])
 
   // Toggle a pending script checkbox
   const togglePendingScript = (scriptPath) => {
@@ -309,6 +384,17 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
       setCheckedPendingScripts(new Set(pendingScripts))
     }
   }
+
+  // Keyboard escape handler for modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && showPendingModal) {
+        handleDismissPending()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [showPendingModal, handleDismissPending])
 
   const addTerminal = () => {
     terminalIdCounter++
@@ -401,6 +487,13 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
               disabled={isRunning || selectedScripts.size === 0}
             >
               {isRunning ? 'Running...' : 'Run'}
+            </button>
+            <button
+              className="btn-header btn-stop"
+              onClick={handleStop}
+              disabled={!isRunning}
+            >
+              Stop
             </button>
             <button className="btn-header" onClick={fetchScripts}>
               Refresh
@@ -526,11 +619,18 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
         </div>
       )}
 
-      {/* Pending Scripts Modal */}
+      {/* Scripts Modified Modal - shows when Claude finishes editing */}
       {showPendingModal && pendingScripts.length > 0 && (
-        <div className="pending-modal-overlay" onClick={handleDismissPending}>
-          <div className="pending-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="pending-modal-icon">📝</div>
+        <div className="pending-modal-overlay" onMouseDown={handleDismissPending}>
+          <div className="pending-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              className="pending-modal-close"
+              onMouseDown={handleDismissPending}
+              title="Close (Esc)"
+            >
+              ×
+            </button>
+            <div className="pending-modal-icon">✓</div>
             <h3>Scripts Modified</h3>
             <div className="pending-scripts-list">
               <label className="pending-script-item select-all">
@@ -555,14 +655,14 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
             <div className="pending-modal-actions">
               <button
                 className="btn-run-pending"
-                onClick={handleApprovePending}
+                onMouseDown={handleApprovePending}
                 disabled={isRunning || checkedPendingScripts.size === 0}
               >
                 {isRunning ? 'Running...' : `Run ${checkedPendingScripts.size} Script${checkedPendingScripts.size !== 1 ? 's' : ''}`}
               </button>
               <button
                 className="btn-dismiss"
-                onClick={handleDismissPending}
+                onMouseDown={handleDismissPending}
               >
                 Dismiss
               </button>
@@ -570,6 +670,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent }) {
           </div>
         </div>
       )}
+
     </div>
   )
 }
