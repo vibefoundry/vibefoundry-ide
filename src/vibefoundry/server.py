@@ -1330,13 +1330,15 @@ async def websocket_terminal(websocket: WebSocket):
     pid, fd = pty.fork()
 
     if pid == 0:
-        # Child process - start bash
+        # Child process - create new session/process group so we can kill all children
+        os.setsid()
         cwd = str(state.project_folder) if state.project_folder else str(Path.home())
         os.chdir(cwd)
         os.environ["TERM"] = "xterm-256color"
         os.execvp("bash", ["bash", "-l"])
     else:
         # Parent process - relay data
+        print(f"[Terminal] Started PTY process {pid}")
         set_terminal_size(fd, 24, 80)
 
         # Make fd non-blocking
@@ -1376,14 +1378,46 @@ async def websocket_terminal(websocket: WebSocket):
                 except asyncio.TimeoutError:
                     pass
                 except WebSocketDisconnect:
+                    print(f"[Terminal] WebSocket disconnected, cleaning up PTY {pid}")
                     break
         finally:
-            os.close(fd)
+            # Clean up: close fd and kill the entire process group
+            print(f"[Terminal] Cleaning up PTY process {pid}")
             try:
-                os.kill(pid, signal.SIGTERM)
-                os.waitpid(pid, 0)
-            except:
+                os.close(fd)
+            except OSError:
                 pass
+
+            # Kill the entire process group (bash + all child processes like claude)
+            try:
+                # First try SIGTERM to the process group
+                os.killpg(pid, signal.SIGTERM)
+            except OSError:
+                # Process group might not exist, try killing just the pid
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
+
+            # Give processes a moment to terminate gracefully
+            await asyncio.sleep(0.5)
+
+            # Force kill if still running
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except OSError:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+            # Reap zombie process
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except OSError:
+                pass
+
+            print(f"[Terminal] PTY process {pid} cleaned up")
 
 
 # Serve static files (React app)
