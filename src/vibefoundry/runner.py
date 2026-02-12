@@ -41,125 +41,9 @@ def discover_scripts(scripts_folder: Path) -> list[Path]:
     return sorted(scripts_folder.glob("**/*.py"))
 
 
-def is_streamlit_script(script_path: Path) -> bool:
-    """Check if a script uses Streamlit by looking for import statements."""
-    try:
-        content = script_path.read_text(encoding='utf-8')
-        # Check for common streamlit import patterns
-        return 'import streamlit' in content or 'from streamlit' in content
-    except Exception:
-        return False
-
-
-# Track running Streamlit processes separately (they run in background)
-streamlit_processes: dict[str, subprocess.Popen] = {}
-
-
-def run_streamlit_script(script_path: Path, project_folder: Path, port: int = 8501) -> ScriptResult:
-    """
-    Run a Streamlit script in the background.
-
-    Args:
-        script_path: Path to the Streamlit script
-        project_folder: Working directory for execution
-        port: Port for Streamlit server (default 8501)
-
-    Returns:
-        ScriptResult indicating the app was started
-    """
-    script_key = str(script_path)
-
-    # Stop any existing Streamlit process for this script
-    if script_key in streamlit_processes:
-        old_process = streamlit_processes[script_key]
-        try:
-            old_process.terminate()
-            old_process.wait(timeout=2)
-        except Exception:
-            try:
-                old_process.kill()
-            except Exception:
-                pass
-        del streamlit_processes[script_key]
-
-    try:
-        # Start Streamlit in the background
-        cmd = [
-            sys.executable, "-m", "streamlit", "run",
-            str(script_path),
-            "--server.headless", "true",
-            "--server.port", str(port),
-            "--browser.gatherUsageStats", "false"
-        ]
-
-        process = subprocess.Popen(
-            cmd,
-            cwd=str(project_folder),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-
-        streamlit_processes[script_key] = process
-
-        # Give it a moment to start
-        import time
-        time.sleep(1)
-
-        # Check if process is still running
-        if process.poll() is None:
-            return ScriptResult(
-                script_path=str(script_path),
-                success=True,
-                stdout=f"🚀 Streamlit app started at http://localhost:{port}\n\nOpen this URL in your browser to view the app.",
-                stderr="",
-                return_code=0
-            )
-        else:
-            # Process exited, likely an error
-            stdout, stderr = process.communicate()
-            del streamlit_processes[script_key]
-            return ScriptResult(
-                script_path=str(script_path),
-                success=False,
-                stdout=stdout,
-                stderr=stderr,
-                return_code=process.returncode,
-                error="Streamlit failed to start"
-            )
-
-    except Exception as e:
-        return ScriptResult(
-            script_path=str(script_path),
-            success=False,
-            stdout="",
-            stderr="",
-            return_code=-1,
-            error=f"Failed to start Streamlit: {str(e)}"
-        )
-
-
-def stop_streamlit_apps() -> int:
-    """Stop all running Streamlit apps."""
-    stopped = 0
-    for script_key in list(streamlit_processes.keys()):
-        process = streamlit_processes[script_key]
-        try:
-            process.terminate()
-            process.wait(timeout=2)
-        except Exception:
-            try:
-                process.kill()
-            except Exception:
-                pass
-        del streamlit_processes[script_key]
-        stopped += 1
-    return stopped
-
-
 def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> ScriptResult:
     """
-    Execute a Python script. Detects Streamlit scripts and runs them with 'streamlit run'.
+    Execute a Python script.
 
     Args:
         script_path: Path to the script
@@ -179,16 +63,10 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
             error=f"Script not found: {script_path}"
         )
 
-    # Detect if this is a Streamlit script
-    if is_streamlit_script(script_path):
-        return run_streamlit_script(script_path, project_folder)
-
     process = None
     try:
-        cmd = [sys.executable, str(script_path)]
-
         process = subprocess.Popen(
-            cmd,
+            [sys.executable, str(script_path)],
             cwd=str(project_folder),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -241,7 +119,7 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
 
 def stop_all_scripts() -> int:
     """
-    Stop all currently running scripts (including Streamlit apps).
+    Stop all currently running scripts.
 
     Returns:
         Number of processes that were stopped
@@ -260,9 +138,6 @@ def stop_all_scripts() -> int:
         finally:
             if process in running_processes:
                 running_processes.remove(process)
-
-    # Also stop any Streamlit apps
-    stopped += stop_streamlit_apps()
 
     return stopped
 
