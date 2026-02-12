@@ -269,11 +269,23 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     // Update modal to show final status
     if (showModal) {
       const hasError = results.some(r => !r.success)
-      setRunningModal(prev => ({
-        ...prev,
-        status: hasError ? 'error' : 'complete',
-        results
-      }))
+      if (hasError) {
+        setRunningModal(prev => ({
+          ...prev,
+          status: 'error',
+          results
+        }))
+      } else {
+        // Auto-close on success after brief delay
+        setRunningModal(prev => ({
+          ...prev,
+          status: 'complete',
+          results
+        }))
+        setTimeout(() => {
+          setRunningModal({ show: false, status: 'running', scripts: [], results: [] })
+        }, 1500)
+      }
     }
   }
 
