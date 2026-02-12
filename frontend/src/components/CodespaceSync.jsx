@@ -687,7 +687,7 @@ function CodespaceSync({ projectPath, onSyncComplete, onConnectionChange, curren
             onClick={handlePushScripts}
             disabled={isPushing}
           >
-            {isPushing ? 'Pulling...' : 'Pull Scripts'}
+            {isPushing ? 'Pushing...' : 'Push Scripts'}
           </button>
           <button
             className="btn-small btn-warning"
