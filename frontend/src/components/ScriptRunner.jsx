@@ -27,6 +27,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
   const isRunningRef = useRef(false)
   const hasCompletedInitialLoadRef = useRef(false) // Only show banner after first successful load + settle
   const bannerTimeoutRef = useRef(null) // For auto-dismissing the banner
+  const modalDismissedAtRef = useRef(0) // Cooldown: track when modal was last dismissed
 
   // Fetch scripts list
   const fetchScripts = useCallback(async () => {
@@ -71,14 +72,24 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
       return
     }
 
+    // Skip if modal is currently showing - don't accumulate more while user is deciding
+    if (showPendingModal) {
+      return
+    }
+
+    // Skip during cooldown period after modal was dismissed
+    const now = Date.now()
+    if (now - modalDismissedAtRef.current < 5000) {
+      return
+    }
+
     const scriptPath = scriptChangeEvent.path
     // Normalize path for case-insensitive comparison (Windows)
     const normalizedPath = scriptPath.toLowerCase()
-    const now = Date.now()
 
-    // Skip if we already processed this path within 1 second (tighter debounce for banner)
+    // Skip if we already processed this path within 3 seconds (stronger debounce)
     const lastTime = lastProcessedEventsRef.current[normalizedPath]
-    if (lastTime && (now - lastTime) < 1000) {
+    if (lastTime && (now - lastTime) < 3000) {
       return
     }
     lastProcessedEventsRef.current[normalizedPath] = now
@@ -105,7 +116,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
       next.add(scriptPath)
       return next
     })
-  }, [scriptChangeEvent, fetchScripts])
+  }, [scriptChangeEvent, fetchScripts, showPendingModal])
 
   // Watch terminal activity - show modal when terminal goes idle for 2 seconds
   useEffect(() => {
@@ -115,6 +126,12 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     // Check every 500ms if terminal has been idle for 2 seconds
     const checkIdle = () => {
       const now = Date.now()
+
+      // Respect cooldown period after modal was dismissed (5 seconds)
+      if (now - modalDismissedAtRef.current < 5000) {
+        return
+      }
+
       const idleTime = now - lastTerminalActivity
       if (idleTime >= 2000) {
         // Terminal has been idle for 2 seconds - Claude is done, show modal
@@ -412,6 +429,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     setPendingScripts([])
     setCheckedPendingScripts(new Set())
     setShowPendingModal(false)
+    modalDismissedAtRef.current = Date.now() // Start cooldown
   }, [pendingScripts, checkedPendingScripts])
 
   // Dismiss the modal
@@ -419,6 +437,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     setPendingScripts([])
     setCheckedPendingScripts(new Set())
     setShowPendingModal(false)
+    modalDismissedAtRef.current = Date.now() // Start cooldown
   }, [])
 
   // Toggle a pending script checkbox
