@@ -345,6 +345,12 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     setRunningModal({ show: false, status: 'running', scripts: [], results: [] })
   }
 
+  // Cancel running scripts from modal
+  const handleCancelFromModal = async () => {
+    await handleStop()
+    setRunningModal(prev => ({ ...prev, status: 'cancelled' }))
+  }
+
   const handleRun = () => {
     const selected = Array.from(selectedScripts)
     if (selected.length === 0) {
@@ -688,6 +694,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
                     )
                   })}
                 </div>
+                <button className="btn-cancel-run" onMouseDown={handleCancelFromModal}>Cancel</button>
               </>
             )}
             {runningModal.status === 'complete' && (
@@ -713,6 +720,14 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
                     )
                   })}
                 </div>
+                <button className="btn-close-modal" onMouseDown={closeRunningModal}>Close</button>
+              </>
+            )}
+            {runningModal.status === 'cancelled' && (
+              <>
+                <div className="running-modal-icon cancelled">⏹</div>
+                <h3>Cancelled</h3>
+                <p>Script execution was stopped</p>
                 <button className="btn-close-modal" onMouseDown={closeRunningModal}>Close</button>
               </>
             )}

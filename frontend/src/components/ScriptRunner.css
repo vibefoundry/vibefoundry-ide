@@ -640,6 +640,10 @@
   color: #ef4444;
 }
 
+.running-modal-icon.cancelled {
+  color: #f59e0b;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -723,4 +727,20 @@
 
 .btn-close-modal:hover {
   opacity: 0.9;
+}
+
+.btn-cancel-run {
+  background: none;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+  padding: 8px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.btn-cancel-run:hover {
+  background: #ef4444;
+  color: white;
 }
