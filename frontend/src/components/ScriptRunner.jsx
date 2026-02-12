@@ -20,6 +20,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
   const [isResizingScripts, setIsResizingScripts] = useState(false)
   const [installModal, setInstallModal] = useState({ show: false, module: null, scriptPath: null })
   const [isInstalling, setIsInstalling] = useState(false)
+  const [runningModal, setRunningModal] = useState({ show: false, status: 'running', scripts: [], results: [] })
   const outputRef = useRef(null)
   const scriptsResizeRef = useRef(null)
   const scriptQueueRef = useRef([])
@@ -224,7 +225,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
   }
 
   // Queue scripts to run (prevents concurrent runs)
-  const queueScripts = (scriptPaths) => {
+  const queueScripts = (scriptPaths, showModal = true) => {
     // Add to queue (avoid duplicates)
     for (const path of scriptPaths) {
       if (!scriptQueueRef.current.includes(path)) {
@@ -232,26 +233,51 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
       }
     }
     // Start processing if not already running
-    processQueue()
+    processQueue(showModal)
   }
 
   // Process the script queue one at a time
-  const processQueue = async () => {
+  const processQueue = async (showModal = true) => {
     if (isRunningRef.current || scriptQueueRef.current.length === 0) return
 
     isRunningRef.current = true
     setIsRunning(true)
 
+    // Get all scripts to run for the modal
+    const allScripts = [...scriptQueueRef.current]
+    const results = []
+
+    // Show running modal
+    if (showModal) {
+      setRunningModal({ show: true, status: 'running', scripts: allScripts, results: [] })
+    }
+
     while (scriptQueueRef.current.length > 0) {
       const scriptPath = scriptQueueRef.current.shift()
-      await runSingleScript(scriptPath)
+      const result = await runSingleScript(scriptPath)
+      results.push({ script: scriptPath, ...result })
+
+      // Update modal with progress
+      if (showModal) {
+        setRunningModal(prev => ({ ...prev, results: [...results] }))
+      }
     }
 
     isRunningRef.current = false
     setIsRunning(false)
+
+    // Update modal to show final status
+    if (showModal) {
+      const hasError = results.some(r => !r.success)
+      setRunningModal(prev => ({
+        ...prev,
+        status: hasError ? 'error' : 'complete',
+        results
+      }))
+    }
   }
 
-  // Run a single script
+  // Run a single script - returns result object
   const runSingleScript = async (scriptPath) => {
     const scriptName = scriptPath.split('/').pop()
     addOutput('─'.repeat(40), 'divider')
@@ -291,18 +317,32 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
             setInstallModal({ show: true, module: missingModule, scriptPath })
           }
         }
+
+        return {
+          success: result.success,
+          timed_out: result.timed_out,
+          return_code: result.return_code,
+          error: result.error
+        }
       } else {
         addOutput(`Failed to run ${scriptName}`, 'error')
+        return { success: false, error: 'Failed to run script' }
       }
     } catch (err) {
       addOutput(`Error: ${err.message}`, 'error')
+      return { success: false, error: err.message }
     }
   }
 
   // Run multiple scripts (used by manual Run button)
-  const runScripts = async (scriptPaths) => {
+  const runScripts = async (scriptPaths, showModal = true) => {
     if (scriptPaths.length === 0) return
-    queueScripts(scriptPaths)
+    queueScripts(scriptPaths, showModal)
+  }
+
+  // Close the running modal
+  const closeRunningModal = () => {
+    setRunningModal({ show: false, status: 'running', scripts: [], results: [] })
   }
 
   const handleRun = () => {
@@ -615,6 +655,67 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Running Status Modal */}
+      {runningModal.show && (
+        <div className="running-modal-overlay" onMouseDown={runningModal.status !== 'running' ? closeRunningModal : undefined}>
+          <div className="running-modal" onMouseDown={(e) => e.stopPropagation()}>
+            {runningModal.status === 'running' && (
+              <>
+                <div className="running-modal-icon spinning">⟳</div>
+                <h3>Running Scripts...</h3>
+                <div className="running-scripts-list">
+                  {runningModal.scripts.map((script, i) => {
+                    const scriptName = script.split('/').pop()
+                    const result = runningModal.results[i]
+                    let statusIcon = '○'
+                    let statusClass = 'pending'
+                    if (result) {
+                      statusIcon = result.success ? '✓' : '✗'
+                      statusClass = result.success ? 'success' : 'error'
+                    } else if (i === runningModal.results.length) {
+                      statusIcon = '●'
+                      statusClass = 'running'
+                    }
+                    return (
+                      <div key={i} className={`running-script-item ${statusClass}`}>
+                        <span className="running-script-status">{statusIcon}</span>
+                        <span className="running-script-name">{scriptName}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+            {runningModal.status === 'complete' && (
+              <>
+                <div className="running-modal-icon complete">✓</div>
+                <h3>Complete</h3>
+                <p>{runningModal.results.length} script{runningModal.results.length !== 1 ? 's' : ''} finished successfully</p>
+                <button className="btn-close-modal" onMouseDown={closeRunningModal}>Close</button>
+              </>
+            )}
+            {runningModal.status === 'error' && (
+              <>
+                <div className="running-modal-icon error">✗</div>
+                <h3>Error</h3>
+                <div className="running-scripts-list">
+                  {runningModal.results.map((result, i) => {
+                    const scriptName = result.script.split('/').pop()
+                    return (
+                      <div key={i} className={`running-script-item ${result.success ? 'success' : 'error'}`}>
+                        <span className="running-script-status">{result.success ? '✓' : '✗'}</span>
+                        <span className="running-script-name">{scriptName}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+                <button className="btn-close-modal" onMouseDown={closeRunningModal}>Close</button>
+              </>
+            )}
           </div>
         </div>
       )}

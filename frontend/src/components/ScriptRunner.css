@@ -593,3 +593,134 @@
 .btn-dismiss:hover {
   background: var(--color-bg-subtle);
 }
+
+/* Running Status Modal */
+.running-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.running-modal {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  max-height: 80vh;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.running-modal-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.running-modal-icon.spinning {
+  animation: spin 1s linear infinite;
+  color: var(--color-accent);
+}
+
+.running-modal-icon.complete {
+  color: #22c55e;
+}
+
+.running-modal-icon.error {
+  color: #ef4444;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.running-modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  color: var(--color-text);
+}
+
+.running-modal p {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.running-scripts-list {
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-subtle);
+}
+
+.running-script-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 13px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+}
+
+.running-script-item:last-child {
+  border-bottom: none;
+}
+
+.running-script-item.pending {
+  color: var(--color-text-muted);
+}
+
+.running-script-item.running .running-script-status {
+  color: var(--color-accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.running-script-item.success .running-script-status {
+  color: #22c55e;
+}
+
+.running-script-item.error .running-script-status {
+  color: #ef4444;
+}
+
+.running-script-status {
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+}
+
+.running-script-name {
+  flex: 1;
+}
+
+.btn-close-modal {
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-close-modal:hover {
+  opacity: 0.9;
+}
