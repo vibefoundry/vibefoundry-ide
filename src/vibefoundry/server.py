@@ -190,6 +190,10 @@ async def lifespan(app: FastAPI):
     # Cleanup
     if state.watcher:
         state.watcher.stop()
+    # Stop any running scripts (including Streamlit apps)
+    stopped = stop_all_scripts()
+    if stopped:
+        print(f"[Shutdown] Stopped {stopped} running script(s)")
 
 
 # Create FastAPI app
