@@ -385,14 +385,13 @@ function App() {
               offset: fileData.offset,
               limit: fileData.limit
             })
-          } else if (fileData.encoding === 'base64') {
-            // Image file
-            const ext = fileName.split('.').pop()?.toLowerCase()
+          } else if (fileData.type === 'image') {
+            // Image file - backend returns path for direct serving
             setFileContent({
               type: 'image',
-              content: fileData.content,
+              path: fileData.path,
               filename: fileData.filename,
-              extension: ext
+              extension: fileData.extension
             })
           }
         }
@@ -563,6 +562,14 @@ function App() {
             totalRows: data.totalRows,
             offset: data.offset,
             limit: data.limit
+          })
+        } else if (data.type === 'image') {
+          // Image - backend returns path for direct serving
+          setFileContent({
+            type: 'image',
+            path: data.path,
+            filename: data.filename,
+            extension: data.extension
           })
         } else {
           const fileType = getFileType(file.name)
@@ -812,15 +819,36 @@ function App() {
         const res = await fetch(`/api/files/read?path=${encodeURIComponent(selectedFile.path)}`)
         if (res.ok) {
           const data = await res.json()
-          const fileType = getFileType(selectedFile.name)
-          const extension = getExtension(selectedFile.name)
-          setFileContent({
-            type: fileType,
-            content: data.content,
-            filename: data.filename,
-            extension,
-            encoding: data.encoding
-          })
+          if (data.type === 'dataframe') {
+            setFileContent({
+              type: 'dataframe',
+              columns: data.columns,
+              columnInfo: data.columnInfo,
+              data: data.data,
+              filename: data.filename,
+              filePath: data.filePath,
+              totalRows: data.totalRows,
+              offset: data.offset,
+              limit: data.limit
+            })
+          } else if (data.type === 'image') {
+            setFileContent({
+              type: 'image',
+              path: data.path,
+              filename: data.filename,
+              extension: data.extension
+            })
+          } else {
+            const fileType = getFileType(selectedFile.name)
+            const extension = getExtension(selectedFile.name)
+            setFileContent({
+              type: fileType,
+              content: data.content,
+              filename: data.filename,
+              extension,
+              encoding: data.encoding
+            })
+          }
         }
       } catch (err) {
         console.error('Failed to refresh file:', err)
