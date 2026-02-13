@@ -11,11 +11,10 @@ const FileViewer = ({ content, canWrite, onSave, saveStatus }) => {
       case 'dataframe':
         return <DataFrameViewer content={content} />
       case 'image':
-        const ext = (content.extension || 'png').replace(/^\./, '') // Remove leading dot if present
         return (
           <div className="image-viewer">
             <img
-              src={`data:image/${ext};base64,${content.content}`}
+              src={`/api/image?path=${encodeURIComponent(content.path)}`}
               alt={content.filename}
             />
           </div>

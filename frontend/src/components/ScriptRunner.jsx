@@ -4,7 +4,7 @@ import './ScriptRunner.css'
 
 let terminalIdCounter = 1
 
-function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActivity }) {
+function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActivity, onStreamlitUrl }) {
   const [activeTab, setActiveTab] = useState('scripts') // 'scripts' or 'terminal'
   const [terminals, setTerminals] = useState([{ id: terminalIdCounter }])
   const [activeTerminalId, setActiveTerminalId] = useState(terminalIdCounter)
@@ -21,6 +21,8 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
   const [installModal, setInstallModal] = useState({ show: false, module: null, scriptPath: null })
   const [isInstalling, setIsInstalling] = useState(false)
   const [runningModal, setRunningModal] = useState({ show: false, status: 'running', scripts: [], results: [] })
+  const [runningProcesses, setRunningProcesses] = useState([])
+  const [showProcessManager, setShowProcessManager] = useState(false)
   const outputRef = useRef(null)
   const scriptsResizeRef = useRef(null)
   const scriptQueueRef = useRef([])
@@ -49,6 +51,45 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
       console.error('Failed to fetch scripts:', err)
     }
   }, [])
+
+  // Fetch running processes
+  const fetchProcesses = useCallback(async () => {
+    try {
+      const res = await fetch('/api/processes')
+      if (res.ok) {
+        const data = await res.json()
+        setRunningProcesses(data.processes || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch processes:', err)
+    }
+  }, [])
+
+  // Stop a single process
+  const stopProcess = async (pid) => {
+    try {
+      const res = await fetch('/api/processes/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid })
+      })
+      if (res.ok) {
+        addOutput(`⏹ Stopped process ${pid}`, 'warning')
+        fetchProcesses()
+      }
+    } catch (err) {
+      addOutput(`Error stopping process: ${err.message}`, 'error')
+    }
+  }
+
+  // Poll for running processes when process manager is open
+  useEffect(() => {
+    if (showProcessManager) {
+      fetchProcesses()
+      const interval = setInterval(fetchProcesses, 2000)
+      return () => clearInterval(interval)
+    }
+  }, [showProcessManager, fetchProcesses])
 
   // Load scripts when folder changes
   useEffect(() => {
@@ -333,7 +374,14 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
           addOutput(result.error, 'error')
         }
 
-        if (result.success) {
+        // Check if this was a Streamlit app
+        if (result.streamlit_url) {
+          addOutput(`🚀 Streamlit app running at: ${result.streamlit_url}`, 'success')
+          // Notify parent to show in preview tab
+          if (onStreamlitUrl) {
+            onStreamlitUrl(result.streamlit_url)
+          }
+        } else if (result.success) {
           addOutput(`✓ ${scriptName} completed`, 'success')
         } else if (result.timed_out) {
           addOutput(`⏱ ${scriptName} timed out`, 'error')
@@ -351,7 +399,8 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
           success: result.success,
           timed_out: result.timed_out,
           return_code: result.return_code,
-          error: result.error
+          error: result.error,
+          streamlit_url: result.streamlit_url
         }
       } else {
         addOutput(`Failed to run ${scriptName}`, 'error')
@@ -572,6 +621,13 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
             >
               Stop
             </button>
+            <button
+              className={`btn-header ${showProcessManager ? 'active' : ''}`}
+              onClick={() => setShowProcessManager(!showProcessManager)}
+              title="View running processes"
+            >
+              Processes
+            </button>
             <button className="btn-header" onClick={fetchScripts}>
               Refresh
             </button>
@@ -762,6 +818,70 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
                 <button className="btn-close-modal" onMouseDown={closeRunningModal}>Close</button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Process Manager Modal */}
+      {showProcessManager && (
+        <div className="process-manager-overlay" onMouseDown={() => setShowProcessManager(false)}>
+          <div className="process-manager-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="process-manager-header">
+              <h3>Running Processes</h3>
+              <button className="process-manager-close" onClick={() => setShowProcessManager(false)}>×</button>
+            </div>
+            <div className="process-manager-body">
+              {runningProcesses.length === 0 ? (
+                <div className="no-processes">No processes currently running</div>
+              ) : (
+                <table className="process-table">
+                  <thead>
+                    <tr>
+                      <th>PID</th>
+                      <th>Script</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runningProcesses.map((proc) => (
+                      <tr key={proc.pid}>
+                        <td className="pid-cell">{proc.pid}</td>
+                        <td className="script-cell" title={proc.script_path}>{proc.script_name}</td>
+                        <td className="type-cell">
+                          <span className={`type-badge ${proc.type}`}>{proc.type}</span>
+                        </td>
+                        <td className="status-cell">
+                          <span className={`status-badge ${proc.status}`}>{proc.status}</span>
+                        </td>
+                        <td className="action-cell">
+                          <button
+                            className="btn-kill"
+                            onClick={() => stopProcess(proc.pid)}
+                            title="Stop this process"
+                          >
+                            Kill
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="process-manager-footer">
+              <button className="btn-refresh-processes" onClick={fetchProcesses}>
+                Refresh
+              </button>
+              <button
+                className="btn-kill-all"
+                onClick={handleStop}
+                disabled={runningProcesses.length === 0}
+              >
+                Kill All
+              </button>
+            </div>
           </div>
         </div>
       )}

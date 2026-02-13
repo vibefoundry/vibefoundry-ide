@@ -28,12 +28,13 @@ from contextlib import asynccontextmanager
 import httpx
 import polars as pl
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from vibefoundry.runner import discover_scripts, run_script, setup_project_structure, ScriptResult, stop_all_scripts
+from vibefoundry.runner import discover_scripts, run_script, setup_project_structure, ScriptResult, stop_all_scripts, list_running_processes, stop_process
 from vibefoundry.metadata import generate_metadata
 from vibefoundry.watcher import FileWatcher
 
@@ -170,6 +171,7 @@ class ScriptResultResponse(BaseModel):
     return_code: int
     error: Optional[str] = None
     timed_out: bool = False
+    streamlit_url: Optional[str] = None  # URL if this was a Streamlit app
 
 
 @asynccontextmanager
@@ -326,7 +328,8 @@ async def run_scripts(request: RunScriptsRequest):
             stderr=result.stderr,
             return_code=result.return_code,
             error=result.error,
-            timed_out=result.timed_out
+            timed_out=result.timed_out,
+            streamlit_url=result.streamlit_url
         ))
 
     # Regenerate metadata after running scripts
@@ -341,6 +344,28 @@ async def stop_scripts():
     stopped = stop_all_scripts()
     print(f"[Scripts] Stopped {stopped} running script(s)")
     return {"success": True, "stopped": stopped}
+
+
+@app.get("/api/processes")
+async def get_running_processes():
+    """List all currently running script processes"""
+    processes = list_running_processes()
+    return {"processes": processes}
+
+
+class StopProcessRequest(BaseModel):
+    pid: int
+
+
+@app.post("/api/processes/stop")
+async def stop_single_process(request: StopProcessRequest):
+    """Stop a specific process by PID"""
+    success = stop_process(request.pid)
+    if success:
+        print(f"[Processes] Stopped process {request.pid}")
+        return {"success": True, "pid": request.pid}
+    else:
+        return {"success": False, "error": f"Process {request.pid} not found or could not be stopped"}
 
 
 @app.post("/api/metadata/generate")
@@ -671,39 +696,16 @@ async def read_file(path: str):
                 del temp_df
                 lf = pl.read_excel(file_path).lazy()
 
-            # Compute column metadata from ENTIRE dataset using lazy evaluation
-            # This streams through the file without loading it all into memory
+            # Just store schema types - defer detailed column info until user filters
+            # This avoids scanning the entire file multiple times on load
             column_info = {}
             for col in df_state.columns:
                 dtype = schema.get(col)
                 if dtype is None:
                     continue
-                try:
-                    if dtype.is_numeric():
-                        # Get min/max from entire file (lazy scan)
-                        stats = lf.select([
-                            pl.col(col).min().alias('min'),
-                            pl.col(col).max().alias('max')
-                        ]).collect()
-                        min_val = stats['min'][0]
-                        max_val = stats['max'][0]
-                        column_info[col] = {
-                            "type": "numeric",
-                            "min": float(min_val) if min_val is not None else 0,
-                            "max": float(max_val) if max_val is not None else 0
-                        }
-                    else:
-                        # Get unique values from ENTIRE file (lazy, limited to 1000)
-                        unique_vals = lf.select(
-                            pl.col(col).drop_nulls().unique().head(1000)
-                        ).collect()[col].to_list()
-                        unique_vals = [str(v) for v in unique_vals if v != '']
-                        column_info[col] = {
-                            "type": "categorical",
-                            "values": unique_vals
-                        }
-                except Exception as e:
-                    print(f"[Column Info] Error processing {col}: {e}")
+                if dtype.is_numeric():
+                    column_info[col] = {"type": "numeric", "min": 0, "max": 0}
+                else:
                     column_info[col] = {"type": "categorical", "values": []}
 
             df_state.column_info = column_info
@@ -729,6 +731,11 @@ async def read_file(path: str):
             raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
 
     elif ext in binary_extensions:
+        # Images - return metadata only, frontend uses /api/image endpoint for fast direct loading
+        image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp'}
+        if ext in image_extensions:
+            return {"type": "image", "path": path, "filename": file_path.name, "extension": ext}
+        # Other binary files - still use base64
         import base64
         content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
         return {"content": content, "encoding": "base64", "filename": file_path.name}
@@ -740,6 +747,40 @@ async def read_file(path: str):
             import base64
             content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
             return {"content": content, "encoding": "base64", "filename": file_path.name}
+
+
+@app.get("/api/image")
+async def get_image(path: str):
+    """Serve image files directly as binary for fast loading"""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / path
+
+    # Security check
+    try:
+        file_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    # Map extensions to media types
+    ext = file_path.suffix.lower()
+    media_types = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.ico': 'image/x-icon',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
+    }
+
+    media_type = media_types.get(ext, 'application/octet-stream')
+    return FileResponse(file_path, media_type=media_type)
 
 
 class WriteFileRequest(BaseModel):
