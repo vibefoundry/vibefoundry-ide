@@ -228,6 +228,42 @@ async def health_check():
     return {"status": "ok", "project_folder": str(state.project_folder) if state.project_folder else None}
 
 
+class LaunchTerminalRequest(BaseModel):
+    path: str
+    launch_claude: bool = True
+
+
+@app.post("/api/terminal/launch")
+async def launch_native_terminal(request: LaunchTerminalRequest):
+    """Launch a native terminal window, cd into the project, and optionally launch claude"""
+    import subprocess
+
+    folder_path = Path(request.path)
+    if not folder_path.exists():
+        raise HTTPException(status_code=400, detail="Folder does not exist")
+
+    if sys.platform == 'darwin':  # macOS
+        # Use AppleScript to open Terminal.app with commands
+        if request.launch_claude:
+            script = f'''
+            tell application "Terminal"
+                activate
+                do script "cd \\"{folder_path}\\" && clear && claude"
+            end tell
+            '''
+        else:
+            script = f'''
+            tell application "Terminal"
+                activate
+                do script "cd \\"{folder_path}\\" && clear"
+            end tell
+            '''
+        subprocess.run(['osascript', '-e', script], check=True)
+        return {"status": "ok", "message": "Terminal launched"}
+    else:
+        raise HTTPException(status_code=400, detail="Native terminal launch only supported on macOS")
+
+
 @app.post("/api/folder/select")
 async def select_folder(request: FolderSelectRequest):
     """Set the project folder and initialize structure"""
@@ -284,6 +320,33 @@ async def get_folder_info():
     return {
         "project_folder": str(state.project_folder),
         "name": state.project_folder.name
+    }
+
+
+@app.post("/api/build")
+async def build_project():
+    """Build the project structure - creates folders and copies CLAUDE.md"""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    # Create folder structure
+    folders = setup_project_structure(state.project_folder)
+
+    # Copy CLAUDE.md to app_folder if it exists in reference files
+    claude_md_source = Path(__file__).parent.parent.parent / "reference files" / "CLAUDE.md"
+    claude_md_dest = state.project_folder / "app_folder" / "CLAUDE.md"
+
+    if claude_md_source.exists():
+        import shutil
+        shutil.copy2(claude_md_source, claude_md_dest)
+
+    # Generate metadata now that folders exist
+    generate_metadata(state.project_folder)
+
+    return {
+        "success": True,
+        "folders": {k: str(v) for k, v in folders.items()},
+        "claude_md_copied": claude_md_source.exists()
     }
 
 
@@ -498,11 +561,15 @@ async def create_directory(request: MkdirRequest):
     """Create a new directory"""
     parent = Path(request.path)
 
+    # If path is relative, make it relative to project folder
+    if not parent.is_absolute() and state.project_folder:
+        parent = state.project_folder / request.path
+
     if not parent.exists():
-        raise HTTPException(status_code=404, detail="Parent path does not exist")
+        raise HTTPException(status_code=404, detail=f"Parent path does not exist: {parent}")
 
     if not parent.is_dir():
-        raise HTTPException(status_code=400, detail="Parent path is not a directory")
+        raise HTTPException(status_code=400, detail=f"Parent path is not a directory: {parent}")
 
     # Sanitize folder name - no path traversal
     name = request.name.strip()
@@ -512,7 +579,7 @@ async def create_directory(request: MkdirRequest):
     new_folder = parent / name
 
     if new_folder.exists():
-        raise HTTPException(status_code=409, detail="Folder already exists")
+        raise HTTPException(status_code=409, detail=f"Folder already exists: {new_folder}")
 
     try:
         new_folder.mkdir(parents=False, exist_ok=False)
@@ -868,6 +935,80 @@ async def delete_file(request: DeleteFileRequest):
         file_path.unlink()
 
     return {"success": True, "path": request.path}
+
+
+class RenameRequest(BaseModel):
+    oldPath: str
+    newName: str
+
+
+@app.post("/api/files/rename")
+async def rename_file(request: RenameRequest):
+    """Rename a file or directory"""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    old_path = Path(request.oldPath)
+    if not old_path.is_absolute():
+        old_path = state.project_folder / request.oldPath
+
+    # Security check
+    try:
+        old_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not old_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    new_path = old_path.parent / request.newName
+
+    # Check if new path already exists
+    if new_path.exists():
+        raise HTTPException(status_code=400, detail="A file with that name already exists")
+
+    import shutil
+    shutil.move(str(old_path), str(new_path))
+
+    return {"success": True, "oldPath": str(old_path), "newPath": str(new_path)}
+
+
+class MoveRequest(BaseModel):
+    sourcePath: str
+    destPath: str
+
+
+@app.post("/api/files/move")
+async def move_file(request: MoveRequest):
+    """Move a file or directory"""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    source_path = Path(request.sourcePath)
+    dest_path = Path(request.destPath)
+
+    if not source_path.is_absolute():
+        source_path = state.project_folder / request.sourcePath
+    if not dest_path.is_absolute():
+        dest_path = state.project_folder / request.destPath
+
+    # Security check
+    try:
+        source_path.resolve().relative_to(state.project_folder.resolve())
+        dest_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    # Ensure destination directory exists
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    import shutil
+    shutil.move(str(source_path), str(dest_path))
+
+    return {"success": True, "sourcePath": str(source_path), "destPath": str(dest_path)}
 
 
 # DataFrame streaming endpoints

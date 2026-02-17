@@ -81,6 +81,10 @@ body {
   flex-shrink: 0;
   border-right: none;
   border-left: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
 }
 
 .top-bar-title {
@@ -183,6 +187,18 @@ body {
 
 .btn-flat.btn-primary:hover {
   background: #d8d8d8;
+}
+
+/* Active state for terminal launch buttons */
+.btn-flat.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.btn-flat.active:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 /* Connect button - green accent */
@@ -3338,5 +3354,48 @@ body {
   align-items: center;
   justify-content: center;
   background: #fafafa;
+}
+
+/* Local terminal body - dark theme */
+.local-terminal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+/* Terminal restore button when minimized */
+.terminal-restore-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 12px 6px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 8px 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: var(--font-main);
+}
+
+.terminal-restore-btn:hover {
+  background: var(--color-accent-hover);
+  padding-right: 12px;
+}
+
+.terminal-restore-icon {
+  display: inline-block;
+  transform: rotate(-90deg);
+  font-size: 10px;
 }
 

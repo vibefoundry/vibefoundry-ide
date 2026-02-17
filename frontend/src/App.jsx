@@ -4,6 +4,7 @@ import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import CodespaceSync from './components/CodespaceSync'
 import Terminal from './components/Terminal'
+import LocalTerminal from './components/LocalTerminal'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
 import LoginScreen from './components/LoginScreen'
@@ -26,7 +27,8 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [isResizing, setIsResizing] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
-  const [terminalCollapsed, setTerminalCollapsed] = useState(false)
+  const [terminalCollapsed, setTerminalCollapsed] = useState(true) // Hidden by default
+  const [terminalMode, setTerminalMode] = useState(null) // null | 'virtual' | 'local'
   const [syncControlsCollapsed, setSyncControlsCollapsed] = useState(false) // Collapse sidebar sync controls
   const [canWrite, setCanWrite] = useState(false) // Track if we have write access
   const [saveStatus, setSaveStatus] = useState(null) // 'saving', 'saved', 'error'
@@ -646,23 +648,25 @@ function App() {
     }
   }, [projectPath])
 
-  // Build project structure (scaffolding is done by backend on folder select)
+  // Build project structure - creates folders and copies CLAUDE.md
   const handleBuildProject = async () => {
     if (!projectPath || !canWrite) return
 
     setIsScaffolding(true)
 
     try {
-      // Re-select folder to trigger scaffolding on backend
-      await fetch('/api/folder/select', {
+      // Call the build endpoint to create folder structure
+      const res = await fetch('/api/build', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: projectPath })
+        headers: { 'Content-Type': 'application/json' }
       })
+      if (!res.ok) {
+        throw new Error('Build failed')
+      }
       await handleRefresh()
       setShowBuildModal(false)
     } catch (err) {
-      console.error('Failed to scaffold project:', err)
+      console.error('Failed to build project:', err)
     } finally {
       setIsScaffolding(false)
     }
@@ -898,7 +902,37 @@ function App() {
             </span>
           </div>
           <div className="top-bar-section top-bar-right">
-            {/* Reserved for future controls */}
+            <button
+              className="btn-flat"
+              onClick={async () => {
+                try {
+                  await fetch('/api/terminal/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: projectPath, launch_claude: true })
+                  })
+                } catch (err) {
+                  console.error('Failed to launch terminal:', err)
+                }
+              }}
+            >
+              Local Terminal
+            </button>
+            <button
+              className={`btn-flat ${terminalMode === 'virtual' ? 'active' : ''}`}
+              onClick={() => {
+                if (terminalMode === 'virtual') {
+                  setTerminalMode(null)
+                  setTerminalCollapsed(true)
+                } else {
+                  setTerminalMode('virtual')
+                  setTerminalCollapsed(false)
+                  setShowTerminal(true)
+                }
+              }}
+            >
+              Virtual Space
+            </button>
           </div>
         </div>
       )}
@@ -1061,17 +1095,31 @@ function App() {
           )}
         </div>
 
-        {/* Terminal Pane - Embedded in main area, takes half the space */}
-        {projectPath && !terminalCollapsed && (
+        {/* Terminal Pane - Shows only for Virtual Space mode */}
+        {projectPath && terminalMode === 'virtual' && (
           <>
             <div
               className="terminal-pane-resize-handle"
               onMouseDown={handleTerminalResizeStart}
             />
             <div className="terminal-pane" style={{ width: terminalWidth }}>
-              {/* Codespace controls - collapsible with proper header */}
+              {/* Terminal pane header with close button */}
+              <div className="terminal-pane-header">
+                <span className="terminal-pane-title">Virtual Space</span>
+                <button
+                  className="terminal-pane-collapse"
+                  onClick={() => {
+                    setTerminalMode(null)
+                    setTerminalCollapsed(true)
+                  }}
+                  title="Close terminal"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Codespace controls - collapsible */}
               <div className={`terminal-codespace-section ${codespaceCollapsed ? 'collapsed' : ''}`}>
-                {/* Header bar - always visible */}
                 <div className="codespace-header" onClick={() => setCodespaceCollapsed(!codespaceCollapsed)}>
                   <span className="codespace-header-title">Codespace</span>
                   <button
@@ -1084,7 +1132,6 @@ function App() {
                     {codespaceCollapsed ? '+' : '−'}
                   </button>
                 </div>
-                {/* Content - always rendered but hidden when collapsed */}
                 <div className={`codespace-content ${codespaceCollapsed ? 'hidden' : ''}`}>
                   <CodespaceSync
                     projectPath={projectPath}

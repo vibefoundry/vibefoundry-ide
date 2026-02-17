@@ -781,8 +781,16 @@ const FileTree = ({
     }
 
     try {
-      const parentHandle = await getParentHandle(rootHandle, node.path)
-      await renameEntry(parentHandle, node.name, renameValue.trim(), node.isDirectory)
+      // Use backend API for rename
+      const response = await fetch('/api/files/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPath: node.path, newName: renameValue.trim() })
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || 'Rename failed')
+      }
       if (onRefresh) onRefresh()
     } catch (err) {
       console.error('Rename failed:', err)
@@ -803,11 +811,30 @@ const FileTree = ({
     if (!newItemDialog) return
 
     try {
-      const parentHandle = newItemDialog.parentNode.handle
+      const parentPath = newItemDialog.parentNode.path
       if (newItemDialog.type === 'folder') {
-        await createFolder(parentHandle, name)
+        // Use backend API for folder creation
+        const response = await fetch('/api/fs/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: parentPath, name })
+        })
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.detail || 'Failed to create folder')
+        }
       } else {
-        await createFile(parentHandle, name)
+        // Use backend API for file creation
+        const filePath = `${parentPath}/${name}`
+        const response = await fetch('/api/files/write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: filePath, content: '' })
+        })
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.detail || 'Failed to create file')
+        }
       }
       if (onRefresh) onRefresh()
     } catch (err) {
@@ -866,7 +893,19 @@ const FileTree = ({
     }
 
     // Actual drop
-    if (!draggedNode || !targetNode || !rootHandle) {
+    if (!draggedNode || !targetNode) {
+      handleDragEnd()
+      return
+    }
+
+    // Can only drop onto folders
+    if (!targetNode.isDirectory) {
+      handleDragEnd()
+      return
+    }
+
+    // Can't drop onto itself or its children
+    if (targetNode.path === draggedNode.path || targetNode.path.startsWith(draggedNode.path + '/')) {
       handleDragEnd()
       return
     }
@@ -875,10 +914,17 @@ const FileTree = ({
       // Suppress notifications during move
       isMovingRef.current = true
 
-      const srcParentHandle = await getParentHandle(rootHandle, draggedNode.path)
-      const destParentHandle = targetNode.handle
-
-      await moveEntry(srcParentHandle, destParentHandle, draggedNode.name, draggedNode.isDirectory)
+      // Use backend API for move
+      const destPath = `${targetNode.path}/${draggedNode.name}`
+      const response = await fetch('/api/files/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourcePath: draggedNode.path, destPath })
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || 'Move failed')
+      }
 
       if (onRefresh) onRefresh()
 
@@ -893,7 +939,7 @@ const FileTree = ({
     }
 
     handleDragEnd()
-  }, [draggedNode, rootHandle, onRefresh, handleDragEnd])
+  }, [draggedNode, onRefresh, handleDragEnd])
 
   useEffect(() => {
     const { paths: currentPaths, modTimes: currentModTimes } = collectPathsWithMeta(tree)

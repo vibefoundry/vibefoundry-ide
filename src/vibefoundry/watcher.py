@@ -222,9 +222,10 @@ class FileWatcher:
                 (self.output_folder, "output"),
                 (self.scripts_folder, "scripts")
             ]:
-                folder.mkdir(parents=True, exist_ok=True)
-                handler = FolderHandler(folder_type, self._handle_change)
-                self._observer.schedule(handler, str(folder), recursive=True)
+                # Only watch folders that exist - don't auto-create
+                if folder.exists():
+                    handler = FolderHandler(folder_type, self._handle_change)
+                    self._observer.schedule(handler, str(folder), recursive=True)
 
             self._observer.start()
 
@@ -252,10 +253,8 @@ class FileWatcher:
         self._running = True
         self._loop = loop
 
-        # Ensure folders exist
-        self.input_folder.mkdir(parents=True, exist_ok=True)
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-        self.scripts_folder.mkdir(parents=True, exist_ok=True)
+        # Don't auto-create folders - user must click Build
+        # Only watch folders that already exist
 
         # Try watchdog first
         if self._try_start_watchdog():

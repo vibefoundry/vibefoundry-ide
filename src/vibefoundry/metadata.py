@@ -155,11 +155,15 @@ def generate_metadata(project_folder: Path) -> tuple[Optional[str], Optional[str
     output_folder = project_folder / "output_folder"
     meta_folder = project_folder / "app_folder" / "meta_data"
 
-    # Ensure meta folder exists
-    meta_folder.mkdir(parents=True, exist_ok=True)
-
     input_meta = None
     output_meta = None
+
+    # Only generate metadata if app_folder structure exists (user clicked Build)
+    if not meta_folder.parent.exists():
+        return input_meta, output_meta
+
+    # Ensure meta folder exists within app_folder
+    meta_folder.mkdir(parents=True, exist_ok=True)
 
     if input_folder.exists():
         input_meta = scan_folder_metadata(input_folder, "Input Folder")
