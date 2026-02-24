@@ -8,6 +8,8 @@ import signal
 import re
 import time
 import threading
+import platform
+import shutil
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
@@ -33,7 +35,7 @@ class ScriptResult:
 
 def discover_scripts(scripts_folder: Path) -> list[Path]:
     """
-    Find all Python scripts in the scripts folder.
+    Find all scripts in the scripts folder (.py, .bat, .sh).
 
     Args:
         scripts_folder: Path to app_folder/scripts/
@@ -44,7 +46,49 @@ def discover_scripts(scripts_folder: Path) -> list[Path]:
     if not scripts_folder.exists():
         return []
 
-    return sorted(scripts_folder.glob("**/*.py"))
+    scripts = []
+    for ext in ("*.py", "*.bat", "*.sh"):
+        scripts.extend(scripts_folder.glob(f"**/{ext}"))
+    return sorted(scripts)
+
+
+def get_script_command(script_path: Path) -> tuple[list[str], str]:
+    """
+    Get the command to run a script based on its extension.
+
+    Args:
+        script_path: Path to the script
+
+    Returns:
+        Tuple of (command list, script type string)
+    """
+    ext = script_path.suffix.lower()
+
+    if ext == ".py":
+        return [sys.executable, str(script_path)], "python"
+
+    elif ext == ".bat":
+        # Windows batch files
+        if platform.system() == "Windows":
+            return ["cmd.exe", "/c", str(script_path)], "batch"
+        else:
+            # On non-Windows, try to run with cmd if available (e.g., Wine)
+            # but most likely this won't work - return error-friendly command
+            return ["cmd.exe", "/c", str(script_path)], "batch"
+
+    elif ext == ".sh":
+        # Shell scripts - find bash or sh
+        bash_path = shutil.which("bash")
+        if bash_path:
+            return [bash_path, str(script_path)], "shell"
+        sh_path = shutil.which("sh")
+        if sh_path:
+            return [sh_path, str(script_path)], "shell"
+        # Fallback - will likely fail on Windows without bash
+        return ["bash", str(script_path)], "shell"
+
+    # Unknown extension - try to run directly
+    return [str(script_path)], "unknown"
 
 
 def is_streamlit_script(script_path: Path) -> bool:
@@ -195,7 +239,7 @@ def run_streamlit_script(script_path: Path, project_folder: Path) -> ScriptResul
 
 def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> ScriptResult:
     """
-    Execute a Python script. Detects Streamlit scripts and runs them as background processes.
+    Execute a script (.py, .bat, or .sh). Detects Streamlit scripts and runs them as background processes.
 
     Args:
         script_path: Path to the script
@@ -215,19 +259,23 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
             error=f"Script not found: {script_path}"
         )
 
-    # Check if this is a Streamlit script
-    if is_streamlit_script(script_path):
+    # Check if this is a Streamlit script (only for .py files)
+    if script_path.suffix.lower() == ".py" and is_streamlit_script(script_path):
         return run_streamlit_script(script_path, project_folder)
 
-    # Regular Python script execution
+    # Get the command for this script type
+    command, script_type = get_script_command(script_path)
+
+    # Script execution
     process = None
     try:
         process = subprocess.Popen(
-            [sys.executable, str(script_path)],
+            command,
             cwd=str(project_folder),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            shell=(platform.system() == "Windows" and script_type == "batch")
         )
         running_processes.append(process)
 
@@ -345,11 +393,26 @@ def list_running_processes() -> list[dict]:
     for process in running_processes[:]:
         poll_result = process.poll()
         if poll_result is None:
+            # Determine script path from args
+            script_path = "unknown"
+            if len(process.args) > 1:
+                # Script path is usually the last argument
+                script_path = str(process.args[-1])
+
+            # Determine type from extension
+            script_type = "python"
+            if script_path != "unknown":
+                ext = Path(script_path).suffix.lower()
+                if ext == ".bat":
+                    script_type = "batch"
+                elif ext == ".sh":
+                    script_type = "shell"
+
             processes.append({
                 "pid": process.pid,
-                "script_path": str(process.args[1]) if len(process.args) > 1 else "unknown",
-                "script_name": Path(process.args[1]).name if len(process.args) > 1 else "unknown",
-                "type": "python",
+                "script_path": script_path,
+                "script_name": Path(script_path).name if script_path != "unknown" else "unknown",
+                "type": script_type,
                 "status": "running"
             })
         else:
