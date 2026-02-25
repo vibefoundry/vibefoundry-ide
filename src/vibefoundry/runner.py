@@ -222,6 +222,79 @@ def run_shell_script_in_terminal(script_path: Path, project_folder: Path) -> Scr
         )
 
 
+def run_batch_script_in_terminal(script_path: Path, project_folder: Path) -> ScriptResult:
+    """
+    Run a batch script (.bat) in a new terminal window and open detected URLs in browser.
+
+    Args:
+        script_path: Path to the batch script
+        project_folder: Working directory for execution
+
+    Returns:
+        ScriptResult indicating the script was launched
+    """
+    import webbrowser
+
+    # Detect URLs in the script to open in browser
+    urls = detect_localhost_urls(script_path)
+
+    system = platform.system()
+
+    try:
+        if system == "Windows":
+            # Open a new cmd window and run the batch file
+            subprocess.Popen(
+                ["cmd", "/c", "start", "cmd", "/k", str(script_path)],
+                cwd=str(project_folder),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        elif system == "Darwin":  # macOS
+            # Use osascript to open Terminal - bat files won't run natively but show message
+            return ScriptResult(
+                script_path=str(script_path),
+                success=False,
+                stdout="",
+                stderr="",
+                return_code=-1,
+                error=".bat files can only run on Windows. Use .sh for macOS/Linux."
+            )
+        else:  # Linux
+            return ScriptResult(
+                script_path=str(script_path),
+                success=False,
+                stdout="",
+                stderr="",
+                return_code=-1,
+                error=".bat files can only run on Windows. Use .sh for Linux."
+            )
+
+        # Give the script a moment to start, then open URLs
+        if urls:
+            time.sleep(2)
+            for url in urls:
+                webbrowser.open(url)
+
+        url_msg = f"\nOpened in browser: {', '.join(urls)}" if urls else ""
+        return ScriptResult(
+            script_path=str(script_path),
+            success=True,
+            stdout=f"Script launched in new command window.{url_msg}\n\nUse the command window to see output and Ctrl+C to stop.",
+            stderr="",
+            return_code=0
+        )
+
+    except Exception as e:
+        return ScriptResult(
+            script_path=str(script_path),
+            success=False,
+            stdout="",
+            stderr="",
+            return_code=-1,
+            error=f"Failed to launch command window: {str(e)}"
+        )
+
+
 def is_streamlit_script(script_path: Path) -> bool:
     """
     Check if a script is a Streamlit app by looking for streamlit imports.
@@ -397,6 +470,10 @@ def run_script(script_path: Path, project_folder: Path, timeout: int = 300) -> S
     # Shell scripts run in a new terminal window with auto-browser
     if script_path.suffix.lower() == ".sh":
         return run_shell_script_in_terminal(script_path, project_folder)
+
+    # Batch scripts run in a new cmd window with auto-browser
+    if script_path.suffix.lower() == ".bat":
+        return run_batch_script_in_terminal(script_path, project_folder)
 
     # Get the command for this script type
     command, script_type = get_script_command(script_path)
