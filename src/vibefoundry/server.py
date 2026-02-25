@@ -82,6 +82,8 @@ class DataFrameState:
         file_path = Path(self.file_path)
         if self.file_type == 'csv':
             return pl.scan_csv(file_path, separator=self.csv_separator, infer_schema_length=10000)
+        elif self.file_type == 'parquet':
+            return pl.scan_parquet(file_path)
         elif self.file_type == 'excel':
             # Excel doesn't support lazy scanning, load eagerly but this is rare
             return pl.read_excel(file_path).lazy()
@@ -152,6 +154,95 @@ class DataFrameState:
 
 state = AppState()
 df_state = DataFrameState()
+
+
+def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
+    """Compute column info in a single optimized pass.
+    Batches all numeric stats into one query, then handles categorical columns.
+    Returns min/max/nullCount/zeroCount for numeric, values/nullCount/blankCount for categorical."""
+    column_info = {}
+
+    # Separate numeric and categorical columns
+    numeric_cols = []
+    categorical_cols = []
+    for col in columns:
+        dtype = schema.get(col)
+        if dtype is None:
+            continue
+        if dtype.is_numeric():
+            numeric_cols.append(col)
+        else:
+            categorical_cols.append(col)
+
+    # Batch all numeric column stats in ONE query (single file scan)
+    if numeric_cols:
+        try:
+            exprs = []
+            for col in numeric_cols:
+                exprs.extend([
+                    pl.col(col).min().alias(f'{col}__min'),
+                    pl.col(col).max().alias(f'{col}__max'),
+                    pl.col(col).sum().alias(f'{col}__sum'),
+                    pl.col(col).mean().alias(f'{col}__mean'),
+                    pl.col(col).count().alias(f'{col}__count'),
+                    pl.col(col).is_null().sum().alias(f'{col}__null'),
+                    (pl.col(col) == 0).sum().alias(f'{col}__zero'),
+                ])
+            stats = lf.select(exprs).collect()
+
+            for col in numeric_cols:
+                column_info[col] = {
+                    "type": "numeric",
+                    "min": float(stats[f'{col}__min'][0]) if stats[f'{col}__min'][0] is not None else 0,
+                    "max": float(stats[f'{col}__max'][0]) if stats[f'{col}__max'][0] is not None else 0,
+                    "sum": float(stats[f'{col}__sum'][0]) if stats[f'{col}__sum'][0] is not None else 0,
+                    "mean": float(stats[f'{col}__mean'][0]) if stats[f'{col}__mean'][0] is not None else 0,
+                    "count": int(stats[f'{col}__count'][0]) if stats[f'{col}__count'][0] is not None else 0,
+                    "nullCount": int(stats[f'{col}__null'][0]) if stats[f'{col}__null'][0] is not None else 0,
+                    "zeroCount": int(stats[f'{col}__zero'][0]) if stats[f'{col}__zero'][0] is not None else 0,
+                }
+        except Exception:
+            for col in numeric_cols:
+                column_info[col] = {"type": "numeric", "min": 0, "max": 0, "sum": 0, "mean": 0, "count": 0, "nullCount": 0, "zeroCount": 0}
+
+    # Batch categorical stats in ONE query
+    if categorical_cols:
+        try:
+            exprs = []
+            for col in categorical_cols:
+                exprs.extend([
+                    pl.col(col).count().alias(f'{col}__count'),
+                    pl.col(col).is_null().sum().alias(f'{col}__null'),
+                    (pl.col(col).cast(pl.Utf8) == '').sum().alias(f'{col}__blank'),
+                ])
+            stats = lf.select(exprs).collect()
+
+            # Get unique values for each categorical column (requires separate queries for .unique())
+            for col in categorical_cols:
+                try:
+                    unique_vals = lf.select(
+                        pl.col(col).drop_nulls().cast(pl.Utf8).unique().head(500)
+                    ).collect()[col].to_list()
+                    unique_vals = sorted([str(v) for v in unique_vals if v != ''])
+                except Exception:
+                    unique_vals = []
+
+                column_info[col] = {
+                    "type": "categorical",
+                    "values": unique_vals,
+                    "count": int(stats[f'{col}__count'][0]) if stats[f'{col}__count'][0] is not None else 0,
+                    "nullCount": int(stats[f'{col}__null'][0]) if stats[f'{col}__null'][0] is not None else 0,
+                    "blankCount": int(stats[f'{col}__blank'][0]) if stats[f'{col}__blank'][0] is not None else 0,
+                }
+        except Exception:
+            for col in categorical_cols:
+                column_info[col] = {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0}
+
+    return column_info
+
+
+# Alias for backward compatibility
+_compute_full_column_info = _compute_column_info
 
 
 # Request/Response models
@@ -230,12 +321,12 @@ async def health_check():
 
 class LaunchTerminalRequest(BaseModel):
     path: str
-    launch_claude: bool = True
+    command: str = None  # Optional command to run after cd (e.g., 'claude', 'codex')
 
 
 @app.post("/api/terminal/launch")
 async def launch_native_terminal(request: LaunchTerminalRequest):
-    """Launch a native terminal window, cd into the project, and optionally launch claude"""
+    """Launch a native terminal window, cd into the project, and optionally run a command"""
     import subprocess
 
     folder_path = Path(request.path)
@@ -244,11 +335,11 @@ async def launch_native_terminal(request: LaunchTerminalRequest):
 
     if sys.platform == 'darwin':  # macOS
         # Use AppleScript to open Terminal.app with commands
-        if request.launch_claude:
+        if request.command:
             script = f'''
             tell application "Terminal"
                 activate
-                do script "cd \\"{folder_path}\\" && clear && claude"
+                do script "cd \\"{folder_path}\\" && clear && {request.command}"
             end tell
             '''
         else:
@@ -260,8 +351,21 @@ async def launch_native_terminal(request: LaunchTerminalRequest):
             '''
         subprocess.run(['osascript', '-e', script], check=True)
         return {"status": "ok", "message": "Terminal launched"}
+    elif sys.platform == 'win32':  # Windows
+        # Use start command with /d to set working directory
+        if request.command:
+            subprocess.Popen(
+                f'start "" /d "{folder_path}" cmd /k {request.command}',
+                shell=True
+            )
+        else:
+            subprocess.Popen(
+                f'start "" /d "{folder_path}" cmd',
+                shell=True
+            )
+        return {"status": "ok", "message": "Terminal launched"}
     else:
-        raise HTTPException(status_code=400, detail="Native terminal launch only supported on macOS")
+        raise HTTPException(status_code=400, detail="Native terminal launch not supported on this platform")
 
 
 @app.post("/api/folder/select")
@@ -325,28 +429,86 @@ async def get_folder_info():
 
 @app.post("/api/build")
 async def build_project():
-    """Build the project structure - creates folders and copies CLAUDE.md"""
+    """Build the project structure - creates folders and copies instruction files"""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
     # Create folder structure
     folders = setup_project_structure(state.project_folder)
 
-    # Copy CLAUDE.md to app_folder if it exists in reference files
-    claude_md_source = Path(__file__).parent.parent.parent / "reference files" / "CLAUDE.md"
-    claude_md_dest = state.project_folder / "app_folder" / "CLAUDE.md"
+    import shutil
+    templates_dir = Path(__file__).parent / "templates"
 
+    # Copy CLAUDE.md to project root for Claude Code
+    claude_md_source = templates_dir / "CLAUDE.md"
     if claude_md_source.exists():
-        import shutil
-        shutil.copy2(claude_md_source, claude_md_dest)
+        shutil.copy2(claude_md_source, state.project_folder / "CLAUDE.md")
+
+    # Copy AGENTS.md to project root for ChatGPT/Codex
+    agents_md_source = templates_dir / "AGENTS.md"
+    if agents_md_source.exists():
+        shutil.copy2(agents_md_source, state.project_folder / "AGENTS.md")
+
+    # Initialize git repo if not already one
+    git_initialized = False
+    git_dir = state.project_folder / ".git"
+    if not git_dir.exists():
+        import subprocess
+        try:
+            subprocess.run(
+                ["git", "init"],
+                cwd=str(state.project_folder),
+                capture_output=True,
+                check=True
+            )
+            git_initialized = True
+
+            # Create .gitignore with sensible defaults
+            gitignore_path = state.project_folder / ".gitignore"
+            if not gitignore_path.exists():
+                gitignore_path.write_text(
+                    "# Python\n"
+                    "__pycache__/\n"
+                    "*.py[cod]\n"
+                    ".venv/\n"
+                    "venv/\n"
+                    "*.egg-info/\n"
+                    "\n"
+                    "# Node\n"
+                    "node_modules/\n"
+                    "\n"
+                    "# Environment\n"
+                    ".env\n"
+                    ".env.local\n"
+                    "\n"
+                    "# OS\n"
+                    ".DS_Store\n"
+                    "Thumbs.db\n"
+                )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # git not installed or failed - continue without it
+            pass
 
     # Generate metadata now that folders exist
     generate_metadata(state.project_folder)
 
+    # Restart watcher to pick up newly created folders
+    if state.watcher:
+        state.watcher.stop()
+    state.watcher = FileWatcher(
+        state.project_folder,
+        on_data_change=notify_data_change,
+        on_script_change=notify_script_change,
+        on_output_file_change=notify_output_file_change
+    )
+    await state.watcher.start_async()
+
     return {
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
-        "claude_md_copied": claude_md_source.exists()
+        "claude_md_copied": claude_md_source.exists(),
+        "agents_md_copied": agents_md_source.exists(),
+        "git_initialized": git_initialized
     }
 
 
@@ -590,19 +752,8 @@ async def create_directory(request: MkdirRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create folder: {str(e)}")
 
 
-# Extensions forbidden in app_folder (raw data files)
-FORBIDDEN_APP_FOLDER_EXTENSIONS = {
-    '.csv', '.xlsx', '.xls', '.xlsm', '.xlsb',  # Spreadsheets
-    '.pdf',  # PDFs
-    '.doc', '.docx',  # Word docs
-    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp',  # Images
-    '.json',  # JSON data
-    '.ppt', '.pptx',  # PowerPoint
-}
-
-
 def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_app_folder: bool = False) -> dict:
-    """Build a file tree recursively, auto-deleting forbidden files in app_folder"""
+    """Build a file tree recursively"""
     if deleted_files is None:
         deleted_files = []
 
@@ -610,7 +761,7 @@ def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_
     is_file = path.is_file()
     node = {
         "name": path.name,
-        "path": rel_path if rel_path != "." else path.name,
+        "path": "" if rel_path == "." else rel_path,
         "isDirectory": not is_file,
         "extension": path.suffix if is_file else None,
         "lastModified": path.stat().st_mtime if is_file else None,
@@ -625,18 +776,6 @@ def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_
                 # Skip hidden files
                 if item.name.startswith('.'):
                     continue
-
-                # Auto-delete forbidden files in app_folder
-                if entering_app_folder and item.is_file():
-                    ext = item.suffix.lower()
-                    if ext in FORBIDDEN_APP_FOLDER_EXTENSIONS:
-                        try:
-                            item.unlink()
-                            deleted_files.append(item.name)
-                            print(f"[Safety] Auto-deleted forbidden file: {item.name}")
-                        except Exception as e:
-                            print(f"[Safety] Failed to delete {item.name}: {e}")
-                        continue  # Don't add to tree
 
                 children.append(build_file_tree(item, base_path, deleted_files, entering_app_folder))
         except PermissionError:
@@ -685,7 +824,7 @@ async def read_file(path: str):
     # Determine file type and read accordingly
     ext = file_path.suffix.lower()
     binary_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.pdf', '.zip', '.tar', '.gz'}
-    dataframe_extensions = {'.csv', '.xlsx', '.xls'}
+    dataframe_extensions = {'.csv', '.xlsx', '.xls', '.parquet', '.geoparquet'}
 
     if ext in dataframe_extensions:
         print(f"[File Read] Parsing dataframe: {path}")
@@ -749,6 +888,49 @@ async def read_file(path: str):
                 # Count rows (streams through file but doesn't hold in memory)
                 df_state.total_rows = lf.select(pl.len()).collect().item()
 
+            elif ext in {'.parquet', '.geoparquet'}:
+                # Parquet/GeoParquet - supports lazy scanning
+                df_state.clear()
+                df_state.file_path = str(file_path)
+                df_state.file_type = 'parquet'
+                df_state.csv_separator = ','
+
+                # GeoParquet files may have geometry columns that Polars can't handle
+                # Try normal parquet first, fall back to pyarrow for geoparquet
+                try:
+                    lf = pl.scan_parquet(file_path)
+                    df_state.columns = lf.collect_schema().names()
+                    schema = lf.collect_schema()
+                    df_state.total_rows = lf.select(pl.len()).collect().item()
+                except Exception as parquet_err:
+                    # Likely a geoparquet with unsupported geometry types
+                    # Use pyarrow to read and exclude geometry columns
+                    import pyarrow.parquet as pq
+
+                    parquet_file = pq.ParquetFile(file_path)
+                    arrow_schema = parquet_file.schema_arrow
+
+                    # Find columns that are NOT geometry (extension) types
+                    valid_columns = []
+                    for field in arrow_schema:
+                        # Skip geoarrow extension types
+                        if hasattr(field.type, 'extension_name') and 'geo' in str(field.type.extension_name).lower():
+                            continue
+                        valid_columns.append(field.name)
+
+                    if not valid_columns:
+                        raise HTTPException(status_code=400, detail="GeoParquet file contains only geometry columns")
+
+                    # Read only non-geometry columns
+                    table = parquet_file.read(columns=valid_columns)
+                    temp_df = pl.from_arrow(table)
+
+                    df_state.columns = temp_df.columns
+                    schema = temp_df.schema
+                    df_state.total_rows = len(temp_df)
+                    lf = temp_df.lazy()
+                    del temp_df
+
             else:
                 # Excel - need to read (but usually smaller files)
                 df_state.clear()
@@ -763,17 +945,9 @@ async def read_file(path: str):
                 del temp_df
                 lf = pl.read_excel(file_path).lazy()
 
-            # Just store schema types - defer detailed column info until user filters
-            # This avoids scanning the entire file multiple times on load
-            column_info = {}
-            for col in df_state.columns:
-                dtype = schema.get(col)
-                if dtype is None:
-                    continue
-                if dtype.is_numeric():
-                    column_info[col] = {"type": "numeric", "min": 0, "max": 0}
-                else:
-                    column_info[col] = {"type": "categorical", "values": []}
+            # Compute full column info (unique values for categorical, min/max for numeric)
+            # This scans the entire file once but provides all filter options upfront
+            column_info = _compute_full_column_info(lf, df_state.columns, schema)
 
             df_state.column_info = column_info
 
@@ -802,14 +976,36 @@ async def read_file(path: str):
         image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp'}
         if ext in image_extensions:
             return {"type": "image", "path": path, "filename": file_path.name, "extension": ext}
+        # PDF files - return as base64 with pdf type
+        if ext == '.pdf':
+            import base64
+            content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
+            return {"type": "pdf", "content": content, "encoding": "base64", "filename": file_path.name}
         # Other binary files - still use base64
         import base64
         content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
         return {"content": content, "encoding": "base64", "filename": file_path.name}
+    elif ext == '.json':
+        # JSON files - parse and return structured data
+        try:
+            import json
+            content = file_path.read_text(encoding='utf-8')
+            data = json.loads(content)
+            return {"type": "json", "data": data, "filename": file_path.name}
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            return {"type": "error", "message": f"Failed to parse JSON: {str(e)}", "filename": file_path.name}
+    elif ext in {'.doc', '.docx'}:
+        # Word documents - return as text type with raw content for display
+        try:
+            content = file_path.read_text(encoding='utf-8')
+            return {"type": "text", "content": content, "encoding": "utf-8", "filename": file_path.name}
+        except UnicodeDecodeError:
+            # Word docs are binary, show message
+            return {"type": "word", "path": path, "filename": file_path.name, "message": "Word document preview not available. Download to view."}
     else:
         try:
             content = file_path.read_text(encoding='utf-8')
-            return {"content": content, "encoding": "utf-8", "filename": file_path.name}
+            return {"type": "text", "content": content, "encoding": "utf-8", "filename": file_path.name}
         except UnicodeDecodeError:
             import base64
             content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
@@ -1043,8 +1239,14 @@ async def get_dataframe_rows(
 @app.post("/api/dataframe/query")
 async def query_dataframe(request: DataFrameQueryRequest):
     """Apply filters and/or sort to the DataFrame - streams from disk"""
-    if df_state.file_path is None or df_state.file_path != request.filePath:
+    if df_state.file_path is None:
         raise HTTPException(status_code=400, detail="DataFrame not loaded. Read the file first.")
+
+    # Check if the requested file matches the loaded file (compare by filename since paths may differ)
+    loaded_filename = Path(df_state.file_path).name
+    requested_filename = Path(request.filePath).name
+    if loaded_filename != requested_filename:
+        raise HTTPException(status_code=400, detail=f"Different file loaded. Expected {requested_filename}, got {loaded_filename}")
 
     # Update filters and sort on state
     df_state.current_filters = request.filters
@@ -1071,8 +1273,7 @@ async def query_dataframe(request: DataFrameQueryRequest):
 
 
 async def _compute_cascading_column_info() -> dict:
-    """Compute column info (min/max for numeric, unique values for categorical) from filtered data.
-    Uses lazy evaluation for efficiency."""
+    """Compute column info from filtered data using optimized batched queries."""
     if df_state.file_path is None:
         return {}
 
@@ -1081,46 +1282,9 @@ async def _compute_cascading_column_info() -> dict:
         return {}
 
     lf = df_state._apply_filters_sort(lf)
-
-    # Collect schema to determine column types
     schema = lf.collect_schema()
-    cascading_column_info = {}
 
-    for col in df_state.columns:
-        dtype = schema.get(col)
-        if dtype is None:
-            continue
-
-        try:
-            if dtype.is_numeric():
-                # Get min/max in one query
-                stats = lf.select([
-                    pl.col(col).min().alias('min'),
-                    pl.col(col).max().alias('max')
-                ]).collect()
-                min_val = stats['min'][0]
-                max_val = stats['max'][0]
-                cascading_column_info[col] = {
-                    "type": "numeric",
-                    "min": float(min_val) if min_val is not None else 0,
-                    "max": float(max_val) if max_val is not None else 0
-                }
-            else:
-                # Categorical - get unique values (limit to 500)
-                unique_vals = lf.select(
-                    pl.col(col).drop_nulls().unique().head(500)
-                ).collect()[col].to_list()
-                unique_vals = [str(v) for v in unique_vals if v != '']
-                cascading_column_info[col] = {
-                    "type": "categorical",
-                    "values": unique_vals
-                }
-        except Exception:
-            # If any error, use cached column info
-            if col in df_state.column_info:
-                cascading_column_info[col] = df_state.column_info[col]
-
-    return cascading_column_info
+    return _compute_column_info(lf, df_state.columns, schema)
 
 
 @app.post("/api/dataframe/clear")
@@ -1133,7 +1297,7 @@ async def clear_dataframe():
 # Codespace sync endpoints
 
 FORBIDDEN_SYNC_EXTENSIONS = {'.pdf', '.csv', '.xlsx', '.xls', '.xlsm', '.xlsb', '.ppt', '.pptx'}
-PROTECTED_FILES = {'sync_server.py', 'metadatafarmer.py', 'CLAUDE.md'}
+PROTECTED_FILES = {'sync_server.py', 'metadatafarmer.py', 'CLAUDE.md', 'AGENTS.md'}
 PROTECTED_DIRS = {'meta_data'}
 
 

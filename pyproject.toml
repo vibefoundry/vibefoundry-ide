@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibefoundry"
-version = "0.1.158"
+version = "0.1.176"
 description = "A local IDE for data science workflows with script running, metadata generation, and GitHub Codespace sync"
 readme = "README.md"
 license = {text = "MIT"}
@@ -33,6 +33,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "polars-lts-cpu>=1.0.0",
+    "pyarrow>=14.0.0",
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "websockets>=11.0.0",
@@ -59,4 +60,4 @@ Repository = "https://github.com/vibefoundry/vibefoundry-ide"
 where = ["src"]
 
 [tool.setuptools.package-data]
-vibefoundry = ["static/**/*"]
+vibefoundry = ["static/**/*", "templates/*"]
