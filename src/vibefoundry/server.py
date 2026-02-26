@@ -332,13 +332,36 @@ async def build_project():
     # Create folder structure
     folders = setup_project_structure(state.project_folder)
 
-    # Copy CLAUDE.md to app_folder if it exists in reference files
-    claude_md_source = Path(__file__).parent.parent.parent / "reference files" / "CLAUDE.md"
-    claude_md_dest = state.project_folder / "app_folder" / "CLAUDE.md"
+    # Copy CLAUDE.md and AGENTS.md to app_folder if they exist in reference files
+    import shutil
+    ref_dir = Path(__file__).parent.parent.parent / "reference files"
+    app_folder = state.project_folder / "app_folder"
 
+    claude_md_source = ref_dir / "CLAUDE.md"
+    claude_md_dest = app_folder / "CLAUDE.md"
     if claude_md_source.exists():
-        import shutil
         shutil.copy2(claude_md_source, claude_md_dest)
+
+    agents_md_source = ref_dir / "AGENTS.md"
+    agents_md_dest = app_folder / "AGENTS.md"
+    if agents_md_source.exists():
+        shutil.copy2(agents_md_source, agents_md_dest)
+
+    # Initialize git repo if not already one (so CLAUDE.md is picked up automatically)
+    import subprocess
+    git_initialized = False
+    git_dir = state.project_folder / ".git"
+    if not git_dir.exists():
+        try:
+            result = subprocess.run(
+                ["git", "init"],
+                cwd=str(state.project_folder),
+                capture_output=True,
+                text=True
+            )
+            git_initialized = result.returncode == 0
+        except Exception:
+            pass  # git not available — non-fatal
 
     # Generate metadata now that folders exist
     generate_metadata(state.project_folder)
@@ -346,7 +369,9 @@ async def build_project():
     return {
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
-        "claude_md_copied": claude_md_source.exists()
+        "claude_md_copied": claude_md_source.exists(),
+        "agents_md_copied": agents_md_source.exists(),
+        "git_initialized": git_initialized
     }
 
 
