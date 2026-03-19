@@ -34,9 +34,10 @@ echo "Building Python package..."
 python -m build
 
 # Push to PyPI
+PYPI_TOKEN=$(cat "$SCRIPT_DIR/.pypi_token" 2>/dev/null)
 if [ -z "$PYPI_TOKEN" ]; then
-  echo "Error: PYPI_TOKEN environment variable not set"
-  echo "Run: export PYPI_TOKEN='pypi-...'"
+  echo "Error: .pypi_token file not found"
+  echo "Create .pypi_token in the project root with your PyPI token"
   exit 1
 fi
 echo "Uploading to PyPI..."

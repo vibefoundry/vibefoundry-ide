@@ -334,15 +334,19 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
           results
         }))
       } else {
-        // Auto-close on success after brief delay
+        // Auto-close on success
         setRunningModal(prev => ({
           ...prev,
           status: 'complete',
           results
         }))
+        // Close immediately for terminal-launched scripts (.sh/.bat), brief delay for others
+        const launchedInTerminal = results.every(r =>
+          r.stdout && (r.stdout.includes('launched in new terminal') || r.stdout.includes('launched in new command window'))
+        )
         setTimeout(() => {
           setRunningModal({ show: false, status: 'running', scripts: [], results: [] })
-        }, 1500)
+        }, launchedInTerminal ? 300 : 1500)
       }
     }
   }

@@ -47,6 +47,13 @@ IGNORE_PATTERNS = [
     'time_keeper.txt', 'time_keeper'
 ]
 
+# Directories to skip entirely during polling (heavy/irrelevant for the IDE)
+SKIP_DIRECTORIES = {
+    'node_modules', '__pycache__', '.next', 'build', 'dist',
+    '.cache', '.parcel-cache', '.turbo', 'coverage',
+    'env', 'venv', '.venv',
+}
+
 
 def should_ignore(path: str) -> bool:
     """Check if this file should be ignored"""
@@ -56,6 +63,11 @@ def should_ignore(path: str) -> bool:
             return True
     if name.startswith('.'):
         return True
+    # Check if any parent directory is blacklisted
+    parts = Path(path).parts
+    for part in parts:
+        if part in SKIP_DIRECTORIES:
+            return True
     return False
 
 
@@ -155,13 +167,18 @@ class FileWatcher:
                 self._safe_callback(self.on_script_change, Path(change.path))
 
     def _scan_folder(self, folder: Path) -> dict[str, float]:
-        """Scan folder for polling mode"""
+        """Scan folder for polling mode, skipping blacklisted directories"""
         result = {}
-        if folder.exists():
-            for f in folder.glob("**/*"):
-                if f.is_file() and not should_ignore(str(f)):
+        if not folder.exists():
+            return result
+        for root, dirs, files in os.walk(folder):
+            # Skip blacklisted directories in-place (prevents os.walk from entering them)
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRECTORIES and not d.startswith('.')]
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                if not should_ignore(fpath):
                     try:
-                        result[str(f)] = f.stat().st_mtime
+                        result[fpath] = os.stat(fpath).st_mtime
                     except (OSError, FileNotFoundError):
                         pass
         return result

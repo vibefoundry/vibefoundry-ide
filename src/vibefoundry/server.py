@@ -559,8 +559,12 @@ async def run_scripts(request: RunScriptsRequest):
             streamlit_url=result.streamlit_url
         ))
 
-    # Regenerate metadata after running scripts
-    generate_metadata(state.project_folder)
+    # Regenerate metadata after running scripts (skip for .sh/.bat since they are long-running apps)
+    ran_only_launchers = all(
+        Path(s).suffix.lower() in (".sh", ".bat") for s in request.scripts
+    )
+    if not ran_only_launchers:
+        generate_metadata(state.project_folder)
 
     return {"results": [r.model_dump() for r in results]}
 
@@ -601,7 +605,7 @@ async def regenerate_metadata():
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
-    input_meta, output_meta = generate_metadata(state.project_folder)
+    input_meta, output_meta = await asyncio.to_thread(generate_metadata, state.project_folder)
 
     return {
         "success": True,
@@ -664,7 +668,7 @@ async def check_for_changes():
     has_changes = bool(input_changes or output_changes or script_changes)
 
     if input_changes or output_changes:
-        generate_metadata(state.project_folder)
+        await asyncio.to_thread(generate_metadata, state.project_folder)
 
     return {
         "changes": has_changes,
@@ -754,6 +758,14 @@ async def create_directory(request: MkdirRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create folder: {str(e)}")
 
 
+# Directories to skip when building the file tree (heavy/irrelevant for the IDE)
+TREE_BLACKLIST = {
+    'node_modules', '__pycache__', '.next', 'build', 'dist',
+    '.cache', '.parcel-cache', '.turbo', 'coverage',
+    'env', 'venv', '.venv',
+}
+
+
 def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_app_folder: bool = False) -> dict:
     """Build a file tree recursively"""
     if deleted_files is None:
@@ -778,6 +790,9 @@ def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_
                 # Skip hidden files
                 if item.name.startswith('.'):
                     continue
+                # Skip blacklisted directories
+                if item.is_dir() and item.name in TREE_BLACKLIST:
+                    continue
 
                 children.append(build_file_tree(item, base_path, deleted_files, entering_app_folder))
         except PermissionError:
@@ -794,7 +809,7 @@ async def get_file_tree():
         raise HTTPException(status_code=400, detail="No project folder selected")
 
     deleted_files = []
-    tree = build_file_tree(state.project_folder, state.project_folder, deleted_files)
+    tree = await asyncio.to_thread(build_file_tree, state.project_folder, state.project_folder, deleted_files)
     return {"tree": tree, "deletedFiles": deleted_files}
 
 
@@ -1583,7 +1598,7 @@ async def websocket_watch(websocket: WebSocket):
 async def notify_data_change():
     """Notify all WebSocket clients of data change"""
     if state.project_folder:
-        generate_metadata(state.project_folder)
+        await asyncio.to_thread(generate_metadata, state.project_folder)
 
     message = '{"type": "data_change"}'
     disconnected = []

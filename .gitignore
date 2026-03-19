@@ -36,6 +36,9 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Secrets
+.pypi_token
+
 # Build artifacts
 frontend/dist/
 src/vibefoundry/static/

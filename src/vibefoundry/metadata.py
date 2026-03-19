@@ -240,10 +240,17 @@ def scan_folder_metadata(folder: Path, title: str) -> str:
         ""
     ]
 
-    data_extensions = ['.csv', '.xlsx', '.xls', '.parquet']
+    # Directories to skip during scanning
+    skip_dirs = {'node_modules', '__pycache__', '.next', 'build', 'dist',
+                 '.cache', '.parcel-cache', 'env', 'venv', '.venv'}
+
+    data_extensions = {'.csv', '.xlsx', '.xls', '.parquet'}
     data_files = []
-    for ext in data_extensions:
-        data_files.extend(folder.glob(f"**/*{ext}"))
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+        for fname in files:
+            if any(fname.lower().endswith(ext) for ext in data_extensions):
+                data_files.append(Path(os.path.join(root, fname)))
 
     if not data_files:
         lines.append("No data files found.")
