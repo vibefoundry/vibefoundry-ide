@@ -112,6 +112,59 @@ When building Flask/FastAPI backends that serve data to a React frontend:
 - **Precompute summary statistics** — calculate totals, averages, distributions on server startup or on first request, cache the results
 - **Cache expensive queries** — use a simple dict cache with a TTL or file-mtime invalidation. If the input file hasn't changed, return the cached result.
 - **Cascading filters** — when one filter is applied, recompute the available options for other filters based on the filtered data
+- **Concurrent processing** — when an endpoint needs data from multiple files or multiple independent computations, use `concurrent.futures.ThreadPoolExecutor` to process them in parallel instead of sequentially
+- **Chunked processing for large files** — when a single file is too large to process at once, split the work into chunks using Polars `.slice()` or process in batches, then combine results
+
+### Concurrent Processing Example
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def get_summary(file_path):
+    """Compute summary for a single file."""
+    lf = pl.scan_csv(file_path)
+    return lf.select([
+        pl.col("revenue").sum().alias("total_revenue"),
+        pl.len().alias("row_count"),
+    ]).collect()
+
+@app.route("/api/dashboard")
+def dashboard():
+    data_files = [f for f in os.listdir(INPUT_FOLDER) if f.endswith(".csv")]
+    results = {}
+
+    # Process all files concurrently
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(get_summary, os.path.join(INPUT_FOLDER, f)): f
+            for f in data_files
+        }
+        for future in as_completed(futures):
+            fname = futures[future]
+            results[fname] = future.result().to_dicts()[0]
+
+    return jsonify(results)
+```
+
+### Chunked Processing Example
+
+```python
+def process_large_file(file_path, chunk_size=100_000):
+    """Process a large CSV in chunks and combine results."""
+    lf = pl.scan_csv(file_path)
+    total_rows = lf.select(pl.len()).collect().item()
+
+    all_results = []
+    for offset in range(0, total_rows, chunk_size):
+        chunk = lf.slice(offset, chunk_size).collect()
+        # Process each chunk
+        result = chunk.group_by("category").agg(pl.col("value").sum())
+        all_results.append(result)
+
+    # Combine all chunk results
+    combined = pl.concat(all_results).group_by("category").agg(pl.col("value").sum())
+    return combined
+```
 
 ### React Frontend
 
