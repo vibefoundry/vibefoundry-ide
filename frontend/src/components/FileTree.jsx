@@ -684,25 +684,7 @@ const FileTree = ({
           // Browser mode - use File System Access API
           try {
             const fileHandles = await window.showOpenFilePicker({
-              multiple: true,
-              types: [
-                {
-                  description: 'Data files',
-                  accept: {
-                    'text/csv': ['.csv'],
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                    'application/vnd.ms-excel': ['.xls'],
-                    'application/json': ['.json'],
-                    'text/plain': ['.txt']
-                  }
-                },
-                {
-                  description: 'All files',
-                  accept: {
-                    '*/*': []
-                  }
-                }
-              ]
+              multiple: true
             })
 
             // Copy each selected file to the target folder
@@ -729,7 +711,7 @@ const FileTree = ({
           const input = document.createElement('input')
           input.type = 'file'
           input.multiple = true
-          input.accept = '.csv,.xlsx,.xls,.json,.txt'
+          // Accept any file type
           input.onchange = async (e) => {
             const files = e.target.files
             if (!files || files.length === 0) return

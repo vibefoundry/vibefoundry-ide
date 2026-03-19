@@ -445,6 +445,29 @@ const DataFrameViewer = ({ content }) => {
     <div className={containerClass} ref={containerRef}>
       {/* Table Header */}
       <div className="dataframe-header-container" ref={headerRef}>
+        {/* Summary stats - 4 green rows above column headers */}
+        {[
+          { key: 'count', label: 'Count', get: (info) => info ? info.count?.toLocaleString() : '' },
+          { key: 'sum', label: 'Sum', get: (info) => info?.type === 'numeric' ? formatNumber(info.sum) : '' },
+          { key: 'mean', label: 'Mean', get: (info) => info?.type === 'numeric' ? formatNumber(info.mean) : '' },
+          { key: 'median', label: 'Median', get: (info) => info?.type === 'numeric' ? formatNumber(info.median) : '' },
+        ].map(stat => (
+          <div key={stat.key} className="df-stat-row" style={{ width: getTotalWidth() }}>
+            <div className="df-stat-cell df-stat-label" style={{ width: ROW_NUM_WIDTH, minWidth: ROW_NUM_WIDTH }}>
+              {stat.label}
+            </div>
+            {columns.map(col => {
+              const info = columnInfo[col]
+              const width = getColWidth(col)
+              return (
+                <div key={col} className="df-stat-cell" style={{ width, minWidth: width }}>
+                  {stat.get(info)}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+        {/* Column names row */}
         <div className="df-header-row" style={{ width: getTotalWidth() }}>
           <div className="df-header-cell df-row-num" style={{ width: ROW_NUM_WIDTH, minWidth: ROW_NUM_WIDTH }}>
             #
@@ -584,7 +607,6 @@ const DataFrameViewer = ({ content }) => {
               <div className="filter-values">
                 {columnInfo[activeFilter]?.values
                   ?.filter(v => filterSearch === '' || String(v).toLowerCase().includes(filterSearch.toLowerCase()))
-                  .slice(0, 100)
                   .map((val, idx) => (
                     <label key={idx} className="filter-checkbox">
                       <input

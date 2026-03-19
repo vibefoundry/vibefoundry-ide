@@ -201,6 +201,34 @@ body {
   border-color: var(--color-accent-hover);
 }
 
+/* CLI launcher buttons */
+.btn-flat.btn-claude {
+  background: #d4a574;
+  border-color: #c4956a;
+  color: #3d2200;
+}
+.btn-flat.btn-claude:hover {
+  background: #c4956a;
+}
+
+.btn-flat.btn-codex {
+  background: #a8d8b9;
+  border-color: #8cc8a4;
+  color: #1a3d2a;
+}
+.btn-flat.btn-codex:hover {
+  background: #8cc8a4;
+}
+
+.btn-flat.btn-gemini {
+  background: #a8c4e0;
+  border-color: #8cb0d4;
+  color: #1a2d40;
+}
+.btn-flat.btn-gemini:hover {
+  background: #8cb0d4;
+}
+
 /* Connect button - green accent */
 .btn-connect {
   background: #22c55e;
@@ -563,6 +591,34 @@ body {
   position: relative;
   min-height: 0;
 }
+
+/* Summary stat rows (green, aligned per column) */
+.df-stat-row {
+  display: flex;
+}
+
+.df-stat-cell {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-bottom: 1px solid #c8e6c9;
+  border-right: 1px solid #c8e6c9;
+}
+
+.df-stat-cell.df-stat-label {
+  text-align: left;
+  font-weight: 600;
+  color: #1b5e20;
+}
+
 
 .dataframe-container.fullscreen {
   position: fixed;

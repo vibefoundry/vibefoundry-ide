@@ -909,7 +909,7 @@ function App() {
                   await fetch('/api/terminal/launch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: projectPath, launch_claude: true })
+                    body: JSON.stringify({ path: projectPath })
                   })
                 } catch (err) {
                   console.error('Failed to launch terminal:', err)
@@ -917,6 +917,54 @@ function App() {
               }}
             >
               Local Terminal
+            </button>
+            <button
+              className="btn-flat btn-claude"
+              onClick={async () => {
+                try {
+                  await fetch('/api/terminal/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: projectPath, command: 'claude' })
+                  })
+                } catch (err) {
+                  console.error('Failed to launch Claude:', err)
+                }
+              }}
+            >
+              Claude
+            </button>
+            <button
+              className="btn-flat btn-codex"
+              onClick={async () => {
+                try {
+                  await fetch('/api/terminal/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: projectPath, command: 'codex' })
+                  })
+                } catch (err) {
+                  console.error('Failed to launch Codex:', err)
+                }
+              }}
+            >
+              Codex
+            </button>
+            <button
+              className="btn-flat btn-gemini"
+              onClick={async () => {
+                try {
+                  await fetch('/api/terminal/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: projectPath, command: 'gemini' })
+                  })
+                } catch (err) {
+                  console.error('Failed to launch Gemini:', err)
+                }
+              }}
+            >
+              Gemini
             </button>
             <button
               className={`btn-flat ${terminalMode === 'virtual' ? 'active' : ''}`}

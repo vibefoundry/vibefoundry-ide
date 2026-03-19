@@ -184,6 +184,7 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
                     pl.col(col).max().alias(f'{col}__max'),
                     pl.col(col).sum().alias(f'{col}__sum'),
                     pl.col(col).mean().alias(f'{col}__mean'),
+                    pl.col(col).median().alias(f'{col}__median'),
                     pl.col(col).count().alias(f'{col}__count'),
                     pl.col(col).is_null().sum().alias(f'{col}__null'),
                     (pl.col(col) == 0).sum().alias(f'{col}__zero'),
@@ -197,13 +198,14 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
                     "max": float(stats[f'{col}__max'][0]) if stats[f'{col}__max'][0] is not None else 0,
                     "sum": float(stats[f'{col}__sum'][0]) if stats[f'{col}__sum'][0] is not None else 0,
                     "mean": float(stats[f'{col}__mean'][0]) if stats[f'{col}__mean'][0] is not None else 0,
+                    "median": float(stats[f'{col}__median'][0]) if stats[f'{col}__median'][0] is not None else 0,
                     "count": int(stats[f'{col}__count'][0]) if stats[f'{col}__count'][0] is not None else 0,
                     "nullCount": int(stats[f'{col}__null'][0]) if stats[f'{col}__null'][0] is not None else 0,
                     "zeroCount": int(stats[f'{col}__zero'][0]) if stats[f'{col}__zero'][0] is not None else 0,
                 }
         except Exception:
             for col in numeric_cols:
-                column_info[col] = {"type": "numeric", "min": 0, "max": 0, "sum": 0, "mean": 0, "count": 0, "nullCount": 0, "zeroCount": 0}
+                column_info[col] = {"type": "numeric", "min": 0, "max": 0, "sum": 0, "mean": 0, "median": 0, "count": 0, "nullCount": 0, "zeroCount": 0}
 
     # Batch categorical stats in ONE query
     if categorical_cols:
@@ -221,7 +223,7 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
             for col in categorical_cols:
                 try:
                     unique_vals = lf.select(
-                        pl.col(col).drop_nulls().cast(pl.Utf8).unique().head(500)
+                        pl.col(col).drop_nulls().cast(pl.Utf8).unique()
                     ).collect()[col].to_list()
                     unique_vals = sorted([str(v) for v in unique_vals if v != ''])
                 except Exception:
