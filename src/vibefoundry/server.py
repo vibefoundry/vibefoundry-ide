@@ -485,7 +485,8 @@ async def build_project():
                     "\n"
                     "# OS\n"
                     ".DS_Store\n"
-                    "Thumbs.db\n"
+                    "Thumbs.db\n",
+                    encoding="utf-8"
                 )
         except (subprocess.CalledProcessError, FileNotFoundError):
             # git not installed or failed - continue without it
@@ -845,126 +846,133 @@ async def read_file(path: str):
 
     if ext in dataframe_extensions:
         print(f"[File Read] Parsing dataframe: {path}")
-        # Parse as dataframe using Polars (much faster than pandas)
+        temp_file_path = None  # Track temp files for cleanup
+
         try:
             if ext == '.csv':
-                # Read raw bytes to detect line endings and separator
-                with open(file_path, 'rb') as f:
-                    sample = f.read(4096)
-
-                # Detect line ending style
-                has_crlf = b'\r\n' in sample
-                has_lf = b'\n' in sample
-                has_cr = b'\r' in sample
-
-                # Detect separator from first line
-                if has_crlf:
-                    first_line = sample.split(b'\r\n')[0].decode('utf-8', errors='ignore')
-                elif has_lf:
-                    first_line = sample.split(b'\n')[0].decode('utf-8', errors='ignore')
-                elif has_cr:
-                    first_line = sample.split(b'\r')[0].decode('utf-8', errors='ignore')
-                else:
-                    first_line = sample.decode('utf-8', errors='ignore')
-
-                # Detect separator
-                if '\t' in first_line:
-                    separator = '\t'
-                elif ';' in first_line:
-                    separator = ';'
-                else:
-                    separator = ','
-
-                # Handle old Mac CR-only line endings - need temp file for streaming
-                needs_cr_conversion = has_cr and not has_lf and not has_crlf
-                actual_file_path = file_path
-                temp_file = None
-
-                if needs_cr_conversion:
-                    # Convert CR to LF and write to temp file for streaming
-                    import tempfile
-                    with open(file_path, 'rb') as f:
-                        content = f.read()
-                    content = content.replace(b'\r', b'\n')
-                    temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False)
-                    temp_file.write(content)
-                    temp_file.close()
-                    actual_file_path = Path(temp_file.name)
-                    del content  # Free memory
-
-                # Store CSV file info for streaming
-                df_state.clear()
-                df_state.file_path = str(actual_file_path)
-                df_state.csv_separator = separator
-                df_state.file_type = 'csv'
-
-                # Get schema and row count efficiently using streaming
-                lf = pl.scan_csv(actual_file_path, separator=separator, infer_schema_length=10000)
-                df_state.columns = lf.collect_schema().names()
-                schema = lf.collect_schema()
-                # Count rows (streams through file but doesn't hold in memory)
-                df_state.total_rows = lf.select(pl.len()).collect().item()
-
-            elif ext in {'.parquet', '.geoparquet'}:
-                # Parquet/GeoParquet - supports lazy scanning
-                df_state.clear()
-                df_state.file_path = str(file_path)
-                df_state.file_type = 'parquet'
-                df_state.csv_separator = ','
-
-                # GeoParquet files may have geometry columns that Polars can't handle
-                # Try normal parquet first, fall back to pyarrow for geoparquet
                 try:
-                    lf = pl.scan_parquet(file_path)
+                    # Read raw bytes to detect line endings and separator
+                    with open(file_path, 'rb') as f:
+                        sample = f.read(4096)
+
+                    # Detect line ending style
+                    has_crlf = b'\r\n' in sample
+                    has_lf = b'\n' in sample
+                    has_cr = b'\r' in sample
+
+                    # Detect separator from first line
+                    if has_crlf:
+                        first_line = sample.split(b'\r\n')[0].decode('utf-8', errors='replace')
+                    elif has_lf:
+                        first_line = sample.split(b'\n')[0].decode('utf-8', errors='replace')
+                    elif has_cr:
+                        first_line = sample.split(b'\r')[0].decode('utf-8', errors='replace')
+                    else:
+                        first_line = sample.decode('utf-8', errors='replace')
+
+                    # Detect separator
+                    if '\t' in first_line:
+                        separator = '\t'
+                    elif ';' in first_line:
+                        separator = ';'
+                    else:
+                        separator = ','
+
+                    # Handle old Mac CR-only line endings - need temp file for streaming
+                    needs_cr_conversion = has_cr and not has_lf and not has_crlf
+                    actual_file_path = file_path
+
+                    if needs_cr_conversion:
+                        import tempfile
+                        with open(file_path, 'rb') as f:
+                            content = f.read()
+                        content = content.replace(b'\r', b'\n')
+                        tf = tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False)
+                        tf.write(content)
+                        tf.close()
+                        temp_file_path = tf.name
+                        actual_file_path = Path(temp_file_path)
+                        del content
+
+                    # Store CSV file info for streaming
+                    df_state.clear()
+                    df_state.file_path = str(actual_file_path)
+                    df_state.csv_separator = separator
+                    df_state.file_type = 'csv'
+
+                    # Get schema and row count efficiently using streaming
+                    lf = pl.scan_csv(actual_file_path, separator=separator, infer_schema_length=10000)
                     df_state.columns = lf.collect_schema().names()
                     schema = lf.collect_schema()
                     df_state.total_rows = lf.select(pl.len()).collect().item()
+
+                except Exception as csv_err:
+                    return {"type": "error", "message": f"Could not read CSV file: {csv_err}", "filename": file_path.name}
+
+            elif ext in {'.parquet', '.geoparquet'}:
+                try:
+                    df_state.clear()
+                    df_state.file_path = str(file_path)
+                    df_state.file_type = 'parquet'
+                    df_state.csv_separator = ','
+
+                    try:
+                        lf = pl.scan_parquet(file_path)
+                        df_state.columns = lf.collect_schema().names()
+                        schema = lf.collect_schema()
+                        df_state.total_rows = lf.select(pl.len()).collect().item()
+                    except Exception:
+                        # Fallback to pyarrow (e.g. geoparquet with geometry columns)
+                        try:
+                            import pyarrow.parquet as pq
+
+                            parquet_file = pq.ParquetFile(file_path)
+                            arrow_schema = parquet_file.schema_arrow
+
+                            valid_columns = []
+                            for field in arrow_schema:
+                                if hasattr(field.type, 'extension_name') and 'geo' in str(field.type.extension_name).lower():
+                                    continue
+                                valid_columns.append(field.name)
+
+                            if not valid_columns:
+                                return {"type": "error", "message": "GeoParquet file contains only geometry columns.", "filename": file_path.name}
+
+                            table = parquet_file.read(columns=valid_columns)
+                            temp_df = pl.from_arrow(table)
+
+                            df_state.columns = temp_df.columns
+                            schema = temp_df.schema
+                            df_state.total_rows = len(temp_df)
+                            lf = temp_df.lazy()
+                            del temp_df
+                        except Exception as pyarrow_err:
+                            return {"type": "error", "message": f"Could not read Parquet file: {pyarrow_err}", "filename": file_path.name}
+
                 except Exception as parquet_err:
-                    # Likely a geoparquet with unsupported geometry types
-                    # Use pyarrow to read and exclude geometry columns
-                    import pyarrow.parquet as pq
+                    return {"type": "error", "message": f"Could not read Parquet file: {parquet_err}", "filename": file_path.name}
 
-                    parquet_file = pq.ParquetFile(file_path)
-                    arrow_schema = parquet_file.schema_arrow
-
-                    # Find columns that are NOT geometry (extension) types
-                    valid_columns = []
-                    for field in arrow_schema:
-                        # Skip geoarrow extension types
-                        if hasattr(field.type, 'extension_name') and 'geo' in str(field.type.extension_name).lower():
-                            continue
-                        valid_columns.append(field.name)
-
-                    if not valid_columns:
-                        raise HTTPException(status_code=400, detail="GeoParquet file contains only geometry columns")
-
-                    # Read only non-geometry columns
-                    table = parquet_file.read(columns=valid_columns)
-                    temp_df = pl.from_arrow(table)
-
+            else:
+                # Excel (.xlsx, .xls)
+                try:
+                    df_state.clear()
+                    df_state.file_path = str(file_path)
+                    df_state.file_type = 'excel'
+                    df_state.csv_separator = ','
+                    temp_df = pl.read_excel(file_path)
                     df_state.columns = temp_df.columns
                     schema = temp_df.schema
                     df_state.total_rows = len(temp_df)
                     lf = temp_df.lazy()
                     del temp_df
+                except Exception as excel_err:
+                    return {"type": "error", "message": f"Could not read Excel file: {excel_err}. Make sure 'openpyxl' is installed (pip install openpyxl).", "filename": file_path.name}
 
-            else:
-                # Excel - need to read (but usually smaller files)
-                df_state.clear()
-                df_state.file_path = str(file_path)
-                df_state.file_type = 'excel'
-                df_state.csv_separator = ','
-                # Just get schema info, don't hold the data
-                temp_df = pl.read_excel(file_path)
-                df_state.columns = temp_df.columns
-                schema = temp_df.schema
-                df_state.total_rows = len(temp_df)
-                del temp_df
-                lf = pl.read_excel(file_path).lazy()
-
-            # Compute full column info (unique values for categorical, min/max for numeric)
-            # This scans the entire file once but provides all filter options upfront
-            column_info = _compute_full_column_info(lf, df_state.columns, schema)
+            # Compute column info — if this fails, still return the data without stats
+            try:
+                column_info = _compute_full_column_info(lf, df_state.columns, schema)
+            except Exception:
+                column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0} for col in df_state.columns}
 
             df_state.column_info = column_info
 
@@ -986,7 +994,14 @@ async def read_file(path: str):
                 "filename": file_path.name
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to parse file: {str(e)}")
+            return {"type": "error", "message": f"Unexpected error reading file: {e}", "filename": file_path.name}
+        finally:
+            # Clean up temp files
+            if temp_file_path:
+                try:
+                    os.remove(temp_file_path)
+                except OSError:
+                    pass
 
     elif ext in binary_extensions:
         # Images - return metadata only, frontend uses /api/image endpoint for fast direct loading
@@ -1805,6 +1820,17 @@ async def serve_index():
         )
 
     return FileResponse(index_path)
+
+
+# Serve root-level static files (icon.svg, etc.)
+@app.get("/icon.svg")
+async def serve_icon():
+    """Serve the favicon SVG"""
+    static_dir = get_static_dir()
+    icon_path = static_dir / "icon.svg"
+    if icon_path.exists():
+        return FileResponse(icon_path, media_type="image/svg+xml")
+    return JSONResponse(status_code=404, content={"error": "icon.svg not found"})
 
 
 # Mount static files for assets (at module load time)

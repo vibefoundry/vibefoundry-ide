@@ -9,6 +9,8 @@ import socket
 import sys
 import threading
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
 
@@ -127,8 +129,26 @@ def main(args: Optional[list[str]] = None):
     )
     server_thread.start()
 
-    # Wait for server to start
-    time.sleep(0.5)
+    # Wait for server to be ready (health-check poll instead of fixed sleep)
+    health_url = f"{local_url}/api/health"
+    max_wait = 15  # seconds
+    poll_interval = 0.2  # seconds
+    waited = 0.0
+    server_ready = False
+
+    while waited < max_wait:
+        try:
+            req = urllib.request.urlopen(health_url, timeout=1)
+            if req.status == 200:
+                server_ready = True
+                break
+        except (urllib.error.URLError, ConnectionError, OSError):
+            pass
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+    if not server_ready:
+        print("Warning: Server may not be fully ready, opening browser anyway...")
 
     # Open browser
     if not parsed_args.no_browser:

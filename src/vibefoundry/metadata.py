@@ -383,10 +383,10 @@ def generate_metadata(project_folder: Path) -> tuple[Optional[str], Optional[str
 
     if input_folder.exists():
         input_meta = scan_folder_metadata(input_folder, "Input Folder")
-        (meta_folder / "input_metadata.txt").write_text(input_meta)
+        (meta_folder / "input_metadata.txt").write_text(input_meta, encoding="utf-8")
 
     if output_folder.exists():
         output_meta = scan_folder_metadata(output_folder, "Output Folder")
-        (meta_folder / "output_metadata.txt").write_text(output_meta)
+        (meta_folder / "output_metadata.txt").write_text(output_meta, encoding="utf-8")
 
     return input_meta, output_meta
