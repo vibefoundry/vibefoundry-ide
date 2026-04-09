@@ -1105,12 +1105,17 @@ async def write_file(request: WriteFileRequest):
     return {"success": True, "path": request.path}
 
 
+CSV_TO_PARQUET_THRESHOLD = 100 * 1024 * 1024  # 100MB
+UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
+
+
 @app.post("/api/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
     folder: str = Form(...)
 ):
-    """Upload a binary file to a folder"""
+    """Upload a binary file to a folder, streaming to disk in chunks.
+    Large CSVs (>100MB) are auto-converted to Parquet."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
@@ -1127,11 +1132,35 @@ async def upload_file(
     # Create parent directories if needed
     target_folder.mkdir(parents=True, exist_ok=True)
 
-    # Write file content
-    content = await file.read()
-    target_path.write_bytes(content)
+    # Stream file to disk in chunks to avoid loading entire file into memory
+    bytes_written = 0
+    with open(target_path, "wb") as f:
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            f.write(chunk)
+            bytes_written += len(chunk)
 
-    return {"success": True, "path": f"{folder}/{file.filename}"}
+    # Auto-convert large CSVs to Parquet
+    final_path = target_path
+    converted = False
+    if target_path.suffix.lower() == ".csv" and bytes_written > CSV_TO_PARQUET_THRESHOLD:
+        parquet_path = target_path.with_suffix(".parquet")
+        try:
+            print(f"[Upload] Converting large CSV to Parquet: {target_path.name} ({bytes_written / 1024 / 1024:.1f} MB)")
+            pl.scan_csv(str(target_path)).sink_parquet(str(parquet_path))
+            target_path.unlink()  # Delete original CSV
+            final_path = parquet_path
+            converted = True
+            print(f"[Upload] Conversion complete: {parquet_path.name}")
+        except Exception as e:
+            print(f"[Upload] Parquet conversion failed, keeping CSV: {e}")
+            if parquet_path.exists():
+                parquet_path.unlink()
+
+    result_path = f"{folder}/{final_path.name}"
+    return {"success": True, "path": result_path, "converted": converted}
 
 
 class DeleteFileRequest(BaseModel):
