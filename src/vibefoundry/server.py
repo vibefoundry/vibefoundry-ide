@@ -37,6 +37,11 @@ from pydantic import BaseModel
 from vibefoundry.runner import discover_scripts, run_script, setup_project_structure, ScriptResult, stop_all_scripts, list_running_processes, stop_process
 from vibefoundry.metadata import generate_metadata
 from vibefoundry.watcher import FileWatcher
+from vibefoundry.profiler import (
+    is_file_massive, get_profile_cache_path, is_profile_valid,
+    profile_large_file, read_cached_profile, estimate_filtered_rows,
+    _detect_csv_separator, _get_lazy_frame,
+)
 
 
 # Global state
@@ -59,6 +64,7 @@ class DataFrameState:
         self.total_rows: int = 0
         self.current_filters: dict = {}
         self.current_sort: Optional[dict] = None
+        self.row_limit: Optional[int] = None  # Cap rows for large file preview
         # Small cache for filtered row count (avoids re-scanning)
         self._filtered_row_count: Optional[int] = None
 
@@ -73,6 +79,7 @@ class DataFrameState:
         self.total_rows = 0
         self.current_filters = {}
         self.current_sort = None
+        self.row_limit = None
         self._filtered_row_count = None
 
     def _get_lazy_frame(self) -> Optional[pl.LazyFrame]:
@@ -131,6 +138,10 @@ class DataFrameState:
 
         lf = self._apply_filters_sort(lf)
 
+        # Apply row limit if set (large file preview)
+        if self.row_limit is not None:
+            lf = lf.slice(0, self.row_limit)
+
         # Get total count (cached if no filter changes)
         if self._filtered_row_count is None:
             self._filtered_row_count = lf.select(pl.len()).collect().item()
@@ -154,6 +165,9 @@ class DataFrameState:
 
 state = AppState()
 df_state = DataFrameState()
+
+# Track active profiling task so it can be cancelled
+_profiling_task: Optional[asyncio.Task] = None
 
 
 def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
@@ -968,6 +982,30 @@ async def read_file(path: str):
                 except Exception as excel_err:
                     return {"type": "error", "message": f"Could not read Excel file: {excel_err}. Make sure 'openpyxl' is installed (pip install openpyxl).", "filename": file_path.name}
 
+            # --- Massive file detection ---
+            if is_file_massive(file_path):
+                file_size = file_path.stat().st_size
+                profile_path = get_profile_cache_path(state.project_folder, file_path)
+                has_valid_profile = is_profile_valid(profile_path, file_path)
+
+                # Build column dtypes map
+                col_dtypes = {}
+                for col in df_state.columns:
+                    dtype = schema.get(col) if hasattr(schema, 'get') else schema[col]
+                    col_dtypes[col] = str(dtype) if dtype else "Unknown"
+
+                print(f"[File Read] MASSIVE file detected: {file_path.name} ({file_size / 1024 / 1024:.0f} MB). Profile valid: {has_valid_profile}")
+                return {
+                    "type": "massive_file",
+                    "filename": file_path.name,
+                    "filePath": path,
+                    "fileSize": file_size,
+                    "columns": df_state.columns,
+                    "totalRows": df_state.total_rows,
+                    "hasProfile": has_valid_profile,
+                    "columnDtypes": col_dtypes,
+                }
+
             # Compute column info — if this fails, still return the data without stats
             try:
                 column_info = _compute_full_column_info(lf, df_state.columns, schema)
@@ -1147,17 +1185,29 @@ async def upload_file(
     converted = False
     if target_path.suffix.lower() == ".csv" and bytes_written > CSV_TO_PARQUET_THRESHOLD:
         parquet_path = target_path.with_suffix(".parquet")
-        try:
-            print(f"[Upload] Converting large CSV to Parquet: {target_path.name} ({bytes_written / 1024 / 1024:.1f} MB)")
-            pl.scan_csv(str(target_path)).sink_parquet(str(parquet_path))
-            target_path.unlink()  # Delete original CSV
+        # Check if the watcher already converted this file (race condition)
+        if parquet_path.exists() and not target_path.exists():
+            print(f"[Upload] Watcher already converted CSV to Parquet: {parquet_path.name}")
             final_path = parquet_path
             converted = True
-            print(f"[Upload] Conversion complete: {parquet_path.name}")
-        except Exception as e:
-            print(f"[Upload] Parquet conversion failed, keeping CSV: {e}")
-            if parquet_path.exists():
-                parquet_path.unlink()
+        elif target_path.exists():
+            try:
+                print(f"[Upload] Converting large CSV to Parquet: {target_path.name} ({bytes_written / 1024 / 1024:.1f} MB)")
+                pl.scan_csv(str(target_path)).sink_parquet(str(parquet_path))
+                target_path.unlink()  # Delete original CSV
+                final_path = parquet_path
+                converted = True
+                print(f"[Upload] Conversion complete: {parquet_path.name}")
+            except Exception as e:
+                # Check again if watcher converted while we were trying
+                if parquet_path.exists() and not target_path.exists():
+                    print(f"[Upload] Watcher converted during our attempt: {parquet_path.name}")
+                    final_path = parquet_path
+                    converted = True
+                else:
+                    print(f"[Upload] Parquet conversion failed, keeping CSV: {e}")
+                    if parquet_path.exists():
+                        parquet_path.unlink()
 
     result_path = f"{folder}/{final_path.name}"
     return {"success": True, "path": result_path, "converted": converted}
@@ -1353,6 +1403,246 @@ async def clear_dataframe():
     """Clear the DataFrame from memory"""
     df_state.clear()
     return {"success": True}
+
+
+# --- Large file profiling endpoints ---
+
+class ProfileRequest(BaseModel):
+    filePath: str
+
+class EstimateRequest(BaseModel):
+    filePath: str
+    filters: dict = {}
+
+class FilteredPreviewRequest(BaseModel):
+    filePath: str
+    filters: dict = {}
+    rowLimit: Optional[int] = None
+
+
+@app.post("/api/dataframe/profile")
+async def start_profile(request: ProfileRequest):
+    """Start profiling a massive file. Progress is sent via WebSocket."""
+    global _profiling_task
+
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / request.filePath
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    if ext == ".csv":
+        file_type = "csv"
+    elif ext in {".parquet", ".geoparquet"}:
+        file_type = "parquet"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type for profiling")
+
+    # Check if profile already exists and is valid
+    profile_path = get_profile_cache_path(state.project_folder, file_path)
+    if is_profile_valid(profile_path, file_path):
+        profile = read_cached_profile(profile_path)
+        return {"status": "complete", "profile": profile}
+
+    # Cancel any existing profiling task
+    if _profiling_task and not _profiling_task.done():
+        _profiling_task.cancel()
+
+    async def _run_profiling():
+        """Run profiling in a thread and push progress via WebSocket."""
+        last_progress = [0]
+
+        def on_progress(done: int, total: int):
+            last_progress[0] = done
+            # We'll send progress from the async wrapper below
+            pass
+
+        # Run the CPU-heavy profiling in a thread
+        result = await asyncio.to_thread(
+            profile_large_file, file_path, file_type, state.project_folder, on_progress
+        )
+
+        # Send completion via WebSocket
+        msg = json.dumps({"type": "profile_complete", "filePath": request.filePath, "profile": result})
+        disconnected = []
+        for client in state.websocket_clients:
+            try:
+                await client.send_text(msg)
+            except Exception:
+                disconnected.append(client)
+        for client in disconnected:
+            state.websocket_clients.remove(client)
+
+    # Start profiling with progress polling
+    async def _profile_with_progress():
+        """Wrapper that runs profiling and sends periodic progress updates."""
+        progress_state = {"done": 0, "total": 1}
+
+        def on_progress(done: int, total: int):
+            progress_state["done"] = done
+            progress_state["total"] = total
+
+        # Start the profiling in a thread
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = loop.run_in_executor(
+                pool, profile_large_file, file_path, file_type,
+                state.project_folder, on_progress,
+            )
+
+            # Poll and send progress while profiling runs
+            while not future.done():
+                await asyncio.sleep(0.5)
+                msg = json.dumps({
+                    "type": "profile_progress",
+                    "filePath": request.filePath,
+                    "done": progress_state["done"],
+                    "total": progress_state["total"],
+                })
+                disconnected = []
+                for client in state.websocket_clients:
+                    try:
+                        await client.send_text(msg)
+                    except Exception:
+                        disconnected.append(client)
+                for client in disconnected:
+                    state.websocket_clients.remove(client)
+
+            # Get result (may raise if profiling failed)
+            result = await future
+
+        # Send completion
+        msg = json.dumps({
+            "type": "profile_complete",
+            "filePath": request.filePath,
+            "profile": result,
+        })
+        disconnected = []
+        for client in state.websocket_clients:
+            try:
+                await client.send_text(msg)
+            except Exception:
+                disconnected.append(client)
+        for client in disconnected:
+            state.websocket_clients.remove(client)
+
+    _profiling_task = asyncio.create_task(_profile_with_progress())
+
+    return {"status": "profiling", "message": "Profiling started. Progress will be sent via WebSocket."}
+
+
+@app.get("/api/dataframe/profile/result")
+async def get_profile_result(filePath: str):
+    """Get the cached profile for a file."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / filePath
+    profile_path = get_profile_cache_path(state.project_folder, file_path)
+
+    if not is_profile_valid(profile_path, file_path):
+        raise HTTPException(status_code=404, detail="No valid profile found. Run profiling first.")
+
+    profile = read_cached_profile(profile_path)
+    return {"profile": profile}
+
+
+@app.post("/api/dataframe/estimate-rows")
+async def estimate_rows(request: EstimateRequest):
+    """Estimate row count after applying filters. Fast on Parquet via predicate pushdown."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / request.filePath
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    file_type = "csv" if ext == ".csv" else "parquet"
+    separator = _detect_csv_separator(file_path) if file_type == "csv" else ","
+
+    try:
+        count = await asyncio.to_thread(
+            estimate_filtered_rows, file_path, file_type, request.filters, separator
+        )
+        return {"estimatedRows": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Estimation failed: {e}")
+
+
+@app.post("/api/dataframe/filtered-preview")
+async def filtered_preview(request: FilteredPreviewRequest):
+    """Load a filtered subset of a massive file for preview.
+    Sets up df_state so subsequent /api/dataframe/rows calls work normally."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / request.filePath
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+
+    # Set up df_state
+    df_state.clear()
+    df_state.file_path = str(file_path)
+    if ext == ".csv":
+        df_state.file_type = "csv"
+        df_state.csv_separator = _detect_csv_separator(file_path)
+    elif ext in {".parquet", ".geoparquet"}:
+        df_state.file_type = "parquet"
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    lf = df_state._get_lazy_frame()
+    if lf is None:
+        raise HTTPException(status_code=500, detail="Failed to open file")
+
+    df_state.columns = lf.collect_schema().names()
+    schema = lf.collect_schema()
+
+    # Apply the user's filters
+    df_state.current_filters = request.filters
+    df_state.invalidate_filter_cache()
+
+    # Get total filtered rows
+    # Apply row limit if specified
+    df_state.row_limit = request.rowLimit if request.rowLimit else None
+    df_state.invalidate_filter_cache()
+
+    filtered_lf = df_state._apply_filters_sort(lf)
+    if df_state.row_limit:
+        filtered_lf = filtered_lf.slice(0, df_state.row_limit)
+    total_filtered = filtered_lf.select(pl.len()).collect().item()
+    df_state.total_rows = total_filtered
+
+    # Compute column info on the filtered lazy frame
+    try:
+        column_info = _compute_column_info(filtered_lf, df_state.columns, schema)
+    except Exception:
+        column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0} for col in df_state.columns}
+    df_state.column_info = column_info
+
+    # Get first chunk
+    CHUNK_SIZE = 200
+    rows, total_rows = df_state.get_rows(0, CHUNK_SIZE)
+
+    print(f"[Filtered Preview] {file_path.name}: {total_filtered} rows after filters")
+
+    return {
+        "type": "dataframe",
+        "filePath": request.filePath,
+        "columns": df_state.columns,
+        "columnInfo": column_info,
+        "data": rows,
+        "totalRows": total_rows,
+        "offset": 0,
+        "limit": CHUNK_SIZE,
+        "filename": file_path.name,
+    }
 
 
 # Codespace sync endpoints

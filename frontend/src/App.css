@@ -1877,15 +1877,24 @@ body {
 .modal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  position: relative;
   padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
 }
 
 .modal-header h3 {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
+  text-align: center;
+  flex: 1;
+}
+
+.modal-header .modal-close {
+  position: absolute;
+  right: 16px;
 }
 
 .modal-close {
@@ -2024,18 +2033,24 @@ body {
 .modal .modal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  position: relative;
   padding: 16px 20px;
   border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
 }
 
 .modal .modal-header h3 {
   margin: 0;
   font-size: 16px;
+  text-align: center;
+  flex: 1;
   font-weight: 600;
 }
 
 .modal .modal-close {
+  position: absolute;
+  right: 16px;
   background: none;
   border: none;
   font-size: 24px;
@@ -3453,5 +3468,397 @@ body {
   display: inline-block;
   transform: rotate(-90deg);
   font-size: 10px;
+}
+
+/* ========== Large File Preview Modal ========== */
+
+.large-file-modal {
+  max-width: 800px;
+  max-height: 90vh;
+  width: 95%;
+}
+
+.large-file-modal .modal-header {
+  background: var(--color-bg-subtle);
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  gap: 4px;
+  padding: 16px 20px;
+}
+
+.large-file-modal .modal-body {
+  background: #f4f7fb;
+}
+
+.lfp-header-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.lfp-header-title {
+  text-align: center;
+}
+
+.lfp-header-estimate {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 4px;
+}
+
+.lfp-header-estimate.safe {
+  background: #e6f9e6;
+  color: #1a7a1a;
+}
+
+.lfp-header-estimate.warning {
+  background: #fff7e6;
+  color: #a36800;
+}
+
+.large-file-modal .modal-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+}
+
+.lfp-file-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.lfp-filename {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lfp-meta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.lfp-desc {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  text-align: center;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.lfp-start-btn {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.lfp-start-btn:hover {
+  background: var(--color-accent-hover);
+}
+
+/* Progress bar */
+.lfp-progress-container {
+  margin-top: 20px;
+}
+
+.lfp-progress-bar {
+  height: 10px;
+  background: var(--color-bg-subtle);
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.lfp-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.lfp-progress-text {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+}
+
+/* Row limit dropdown */
+.lfp-row-limit {
+  margin-bottom: 12px;
+}
+
+.lfp-row-limit select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.lfp-row-limit select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-subtle);
+}
+
+/* Filter list — flat rows, no card nesting */
+.lfp-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.lfp-filter-row {
+  padding: 10px 0;
+}
+
+.lfp-filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.lfp-col-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.lfp-filter-type {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-subtle);
+}
+
+/* Numeric range — inline inputs */
+.lfp-numeric-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lfp-numeric-range input {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.lfp-numeric-range input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-subtle);
+}
+
+.lfp-range-sep {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* Categorical dropdown */
+.lfp-dropdown-wrap {
+  position: relative;
+}
+
+.lfp-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.lfp-dropdown-trigger:hover {
+  border-color: var(--color-border-hover);
+}
+
+.lfp-dropdown-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lfp-dropdown-arrow {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.lfp-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+}
+
+.lfp-dropdown-search {
+  padding: 8px 10px;
+  font-size: 13px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text);
+  outline: none;
+}
+
+.lfp-dropdown-list {
+  height: 250px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.lfp-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.lfp-dropdown-item:hover {
+  background: var(--color-bg-subtle);
+}
+
+.lfp-dropdown-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.lfp-show-more {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+  text-align: left;
+  font-weight: 500;
+}
+
+.lfp-show-more:hover {
+  background: var(--color-bg-subtle);
+}
+
+.lfp-dropdown-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+  text-align: center;
+}
+
+.lfp-clear-filter {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  cursor: pointer;
+  text-align: center;
+}
+
+.lfp-clear-filter:hover {
+  color: var(--color-text);
+  background: var(--color-bg-subtle);
+}
+
+/* Action buttons */
+.lfp-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+
+.lfp-cancel-btn {
+  flex: 1;
+  padding: 10px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lfp-cancel-btn:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+.lfp-preview-btn {
+  flex: 2;
+  padding: 10px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lfp-preview-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.lfp-preview-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 

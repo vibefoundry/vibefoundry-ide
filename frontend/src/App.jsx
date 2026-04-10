@@ -436,6 +436,10 @@ function App() {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          // Bridge profile events to the LargeFilePreviewModal via custom event
+          if (data.type === 'profile_progress' || data.type === 'profile_complete') {
+            window.dispatchEvent(new MessageEvent('vf-ws-message', { data: event.data }))
+          }
           if (data.type === 'output_file_change' && data.path) {
             const filePath = data.path
             const fileName = filePath.split('/').pop()
@@ -552,8 +556,20 @@ function App() {
       if (res.ok) {
         const data = await res.json()
 
+        // If file is too large, show the large file preview modal
+        if (data.type === 'massive_file') {
+          setFileContent({
+            type: 'massive_file',
+            filename: data.filename,
+            filePath: data.filePath,
+            fileSize: data.fileSize,
+            columns: data.columns,
+            totalRows: data.totalRows,
+            hasProfile: data.hasProfile,
+            columnDtypes: data.columnDtypes,
+          })
         // If backend already parsed as dataframe, use directly
-        if (data.type === 'dataframe') {
+        } else if (data.type === 'dataframe') {
           setFileContent({
             type: 'dataframe',
             columns: data.columns,
@@ -1114,6 +1130,23 @@ function App() {
               canWrite={canWrite && !!selectedFile?.path}
               onSave={handleFileSave}
               saveStatus={saveStatus}
+              onLargeFilePreviewReady={(data) => {
+                setFileContent({
+                  type: 'dataframe',
+                  columns: data.columns,
+                  columnInfo: data.columnInfo,
+                  data: data.data,
+                  filename: data.filename,
+                  filePath: data.filePath,
+                  totalRows: data.totalRows,
+                  offset: data.offset,
+                  limit: data.limit,
+                })
+              }}
+              onLargeFileCancel={() => {
+                setFileContent(null)
+                setSelectedFile(null)
+              }}
             />
           ) : (
             <div className="placeholder">

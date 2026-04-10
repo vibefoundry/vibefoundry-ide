@@ -1,13 +1,22 @@
 import DataFrameViewer from './DataFrameViewer'
+import LargeFilePreviewModal from './LargeFilePreviewModal'
 import JsonViewer from './JsonViewer'
 import CodeViewer from './CodeViewer'
 import MarkdownViewer from './MarkdownViewer'
 
-const FileViewer = ({ content, canWrite, onSave, saveStatus }) => {
+const FileViewer = ({ content, canWrite, onSave, saveStatus, onLargeFilePreviewReady, onLargeFileCancel }) => {
   if (!content) return null
 
   const renderViewer = () => {
     switch (content.type) {
+      case 'massive_file':
+        return (
+          <LargeFilePreviewModal
+            content={content}
+            onPreviewReady={onLargeFilePreviewReady}
+            onCancel={onLargeFileCancel}
+          />
+        )
       case 'dataframe':
         return <DataFrameViewer content={content} />
       case 'image':

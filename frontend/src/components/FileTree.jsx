@@ -622,9 +622,18 @@ const FileTree = ({
 
   useEffect(() => {
     if (tree.length > 0 && expandedPaths.size === 0) {
-      const rootPath = tree[0]?.path
-      if (rootPath) {
-        setExpandedPaths(new Set([rootPath]))
+      const root = tree[0]
+      if (root?.path) {
+        const paths = new Set([root.path])
+        // Also expand top-level children (app_folder, input_folder, output_folder, etc.)
+        if (root.children) {
+          for (const child of root.children) {
+            if (child.isDirectory) {
+              paths.add(child.path)
+            }
+          }
+        }
+        setExpandedPaths(paths)
       }
     }
   }, [tree])
