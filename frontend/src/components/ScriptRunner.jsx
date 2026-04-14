@@ -458,6 +458,23 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
     }
   }
 
+  const handleRunExternal = async (scriptPath) => {
+    try {
+      const res = await fetch('/api/scripts/run-external', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scriptPath })
+      })
+      if (res.ok) {
+        addOutput(`⬗ Launched externally: ${scriptPath.split('/').pop()}`, 'success')
+      } else {
+        addOutput(`Failed to launch externally`, 'error')
+      }
+    } catch (err) {
+      addOutput(`Error: ${err.message}`, 'error')
+    }
+  }
+
   const handleRefreshMetadata = async () => {
     try {
       const res = await fetch('/api/metadata/generate', { method: 'POST' })
@@ -605,7 +622,7 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
               className={`script-runner-tab ${activeTab === 'terminal' ? 'active' : ''}`}
               onClick={() => setActiveTab('terminal')}
             >
-              Local Terminal
+              Terminal
             </button>
           </div>
         </div>
@@ -655,16 +672,93 @@ function ScriptRunner({ folderName, height, scriptChangeEvent, lastTerminalActiv
                   <button className="btn-link" onClick={selectAll}>All</button>
                   <button className="btn-link" onClick={selectNone}>None</button>
                 </div>
-                {scripts.map((script) => (
-                  <label key={script.path} className="script-item">
-                    <input
-                      type="checkbox"
-                      checked={selectedScripts.has(script.path)}
-                      onChange={() => toggleScript(script.path)}
-                    />
-                    <span className="script-name">{script.relative_path}</span>
-                  </label>
-                ))}
+                {(() => {
+                  // Group scripts by folder
+                  const groups = {}
+                  const rootScripts = []
+                  for (const script of scripts) {
+                    const parts = script.relative_path.split('/')
+                    if (parts.length > 1) {
+                      const folder = parts[0]
+                      if (!groups[folder]) groups[folder] = { app: null, steps: [] }
+                      if (parts[parts.length - 1].endsWith('_app.py')) {
+                        groups[folder].app = script
+                      } else {
+                        groups[folder].steps.push(script)
+                      }
+                    } else {
+                      rootScripts.push(script)
+                    }
+                  }
+
+                  return (
+                    <>
+                      {Object.entries(groups).map(([folder, group]) => {
+                        return (
+                          <div key={folder} className="script-folder-group">
+                            <div className="script-folder-header">
+                              <span className="script-folder-icon">▼</span>
+                              <span className="script-folder-name">{folder}/</span>
+                            </div>
+                            <div className="script-folder-contents">
+                              {group.app && (
+                                <div className="script-item-row">
+                                  <label className="script-item script-item-app">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedScripts.has(group.app.path)}
+                                      onChange={() => toggleScript(group.app.path)}
+                                    />
+                                    <span className="script-name">{group.app.relative_path.split('/').pop()}</span>
+                                  </label>
+                                  <button
+                                    className="btn-run-external"
+                                    onClick={() => handleRunExternal(group.app.path)}
+                                    title="Run in external terminal"
+                                  >⬗</button>
+                                </div>
+                              )}
+                              {group.steps.map((script) => (
+                                <div key={script.path} className="script-item-row">
+                                  <label className="script-item script-item-step">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedScripts.has(script.path)}
+                                      onChange={() => toggleScript(script.path)}
+                                    />
+                                    <span className="script-name">{script.relative_path.split('/').pop()}</span>
+                                  </label>
+                                  <button
+                                    className="btn-run-external"
+                                    onClick={() => handleRunExternal(script.path)}
+                                    title="Run in external terminal"
+                                  >⬗</button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {rootScripts.map((script) => (
+                        <div key={script.path} className="script-item-row">
+                          <label className="script-item">
+                            <input
+                              type="checkbox"
+                              checked={selectedScripts.has(script.path)}
+                              onChange={() => toggleScript(script.path)}
+                            />
+                            <span className="script-name">{script.relative_path}</span>
+                          </label>
+                          <button
+                            className="btn-run-external"
+                            onClick={() => handleRunExternal(script.path)}
+                            title="Run in external terminal"
+                          >⬗</button>
+                        </div>
+                      ))}
+                    </>
+                  )
+                })()}
               </>
             ) : (
               <div className="no-scripts">No scripts in app_folder/scripts/</div>

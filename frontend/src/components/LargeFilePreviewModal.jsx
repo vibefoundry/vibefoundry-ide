@@ -255,7 +255,7 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
   }
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 1200 }}>
+    <div className="large-file-modal-overlay">
       <div className="modal-content large-file-modal">
         <div className="modal-header">
           <div className="lfp-header-content">
@@ -354,7 +354,7 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
                 <button className="lfp-cancel-btn" onClick={onCancel}>Cancel</button>
                 <button
                   className="lfp-preview-btn"
-                  disabled={!isSafe || loading || estimating}
+                  disabled={loading || estimating}
                   onClick={handlePreview}
                 >
                   {loading ? 'Loading Preview...' : 'Preview Filtered Data'}

@@ -4,7 +4,40 @@ import JsonViewer from './JsonViewer'
 import CodeViewer from './CodeViewer'
 import MarkdownViewer from './MarkdownViewer'
 
-const FileViewer = ({ content, canWrite, onSave, saveStatus, onLargeFilePreviewReady, onLargeFileCancel }) => {
+const DocxViewer = ({ content }) => {
+  return (
+    <div className="docx-viewer">
+      <div className="docx-content">
+        {content.paragraphs.map((para, i) => {
+          const style = para.style || ''
+          if (style.startsWith('Heading 1')) return <h1 key={i}>{para.text}</h1>
+          if (style.startsWith('Heading 2')) return <h2 key={i}>{para.text}</h2>
+          if (style.startsWith('Heading 3')) return <h3 key={i}>{para.text}</h3>
+          if (style.startsWith('Heading')) return <h4 key={i}>{para.text}</h4>
+          if (style === 'Title') return <h1 key={i} className="docx-title">{para.text}</h1>
+          if (style === 'Subtitle') return <h2 key={i} className="docx-subtitle">{para.text}</h2>
+          if (style.includes('List')) return <li key={i}>{para.text}</li>
+          return <p key={i}>{para.text}</p>
+        })}
+        {content.tables.map((table, ti) => (
+          <table key={`table-${ti}`} className="docx-table">
+            <tbody>
+              {table.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    ri === 0 ? <th key={ci}>{cell}</th> : <td key={ci}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const FileViewer = ({ content, canWrite, onSave, onSheetChange, saveStatus, onLargeFilePreviewReady, onLargeFileCancel }) => {
   if (!content) return null
 
   const renderViewer = () => {
@@ -18,7 +51,9 @@ const FileViewer = ({ content, canWrite, onSave, saveStatus, onLargeFilePreviewR
           />
         )
       case 'dataframe':
-        return <DataFrameViewer content={content} />
+        return <DataFrameViewer content={content} onSheetChange={onSheetChange} />
+      case 'docx':
+        return <DocxViewer content={content} />
       case 'image':
         return (
           <div className="image-viewer">

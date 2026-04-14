@@ -38,7 +38,7 @@ const VirtualRow = memo(({ index, style, rows, columns, columnWidths, getColWidt
   )
 })
 
-const DataFrameViewer = ({ content }) => {
+const DataFrameViewer = ({ content, onSheetChange }) => {
   // Data state - rows loaded from backend
   const [rows, setRows] = useState(content.data || [])
   const [totalRows, setTotalRows] = useState(content.totalRows || content.data?.length || 0)
@@ -443,6 +443,20 @@ const DataFrameViewer = ({ content }) => {
 
   return (
     <div className={containerClass} ref={containerRef}>
+      {/* Excel Sheet Tabs */}
+      {content.sheetNames && content.sheetNames.length > 1 && (
+        <div className="sheet-tabs">
+          {content.sheetNames.map((name) => (
+            <button
+              key={name}
+              className={`sheet-tab ${name === content.activeSheet ? 'active' : ''}`}
+              onClick={() => onSheetChange && onSheetChange(name)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
       {/* Table Header */}
       <div className="dataframe-header-container" ref={headerRef}>
         {/* Summary stats - 4 green rows above column headers */}

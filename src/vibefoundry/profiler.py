@@ -22,11 +22,13 @@ MASSIVE_FILE_SIZE_THRESHOLD = 100 * 1024 * 1024  # 100MB
 
 
 
+MASSIVE_ROW_THRESHOLD = 500_000  # 500k rows
+
 def is_file_massive(file_path: Path, total_rows: int = 0) -> bool:
-    """Check if a file is larger than 100MB."""
+    """Check if a file is larger than 100MB or has more than 500k rows."""
     try:
         file_size = file_path.stat().st_size
-        return file_size > MASSIVE_FILE_SIZE_THRESHOLD
+        return file_size > MASSIVE_FILE_SIZE_THRESHOLD or total_rows > MASSIVE_ROW_THRESHOLD
     except Exception:
         return False
 

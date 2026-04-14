@@ -453,17 +453,21 @@ async def build_project():
     folders = setup_project_structure(state.project_folder)
 
     import shutil
+    import urllib.request
     templates_dir = Path(__file__).parent / "templates"
+    TEMPLATE_BASE_URL = "https://vibefoundry.ai/templates"
 
-    # Copy CLAUDE.md to project root for Claude Code
-    claude_md_source = templates_dir / "CLAUDE.md"
-    if claude_md_source.exists():
-        shutil.copy2(claude_md_source, state.project_folder / "CLAUDE.md")
-
-    # Copy AGENTS.md to project root for ChatGPT/Codex
-    agents_md_source = templates_dir / "AGENTS.md"
-    if agents_md_source.exists():
-        shutil.copy2(agents_md_source, state.project_folder / "AGENTS.md")
+    for filename in ("CLAUDE.md", "AGENTS.md"):
+        dest = state.project_folder / filename
+        # Try downloading the latest version from the website
+        try:
+            url = f"{TEMPLATE_BASE_URL}/{filename}"
+            urllib.request.urlretrieve(url, str(dest))
+        except Exception:
+            # Fallback to bundled copy
+            bundled = templates_dir / filename
+            if bundled.exists():
+                shutil.copy2(bundled, dest)
 
     # Initialize git repo if not already one
     git_initialized = False
@@ -523,8 +527,8 @@ async def build_project():
     return {
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
-        "claude_md_copied": claude_md_source.exists(),
-        "agents_md_copied": agents_md_source.exists(),
+        "claude_md_copied": (state.project_folder / "CLAUDE.md").exists(),
+        "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
         "git_initialized": git_initialized
     }
 
@@ -582,6 +586,53 @@ async def run_scripts(request: RunScriptsRequest):
         generate_metadata(state.project_folder)
 
     return {"results": [r.model_dump() for r in results]}
+
+
+class RunExternalRequest(BaseModel):
+    scriptPath: str
+
+
+@app.post("/api/scripts/run-external")
+async def run_script_external(request: RunExternalRequest):
+    """Launch a script in the system's external terminal."""
+    import subprocess
+
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    script_path = Path(request.scriptPath)
+    if not script_path.exists():
+        raise HTTPException(status_code=404, detail="Script not found")
+
+    cwd = str(state.project_folder)
+    script = str(script_path)
+
+    if sys.platform == 'darwin':
+        # macOS: open Terminal.app and run the script
+        apple_script = f'''tell application "Terminal"
+    activate
+    do script "cd {cwd} && python \\"{script}\\""
+end tell'''
+        subprocess.Popen(['osascript', '-e', apple_script])
+    elif sys.platform == 'win32':
+        # Windows: open cmd and run the script
+        subprocess.Popen(
+            f'start cmd /k "cd /d {cwd} && python \\"{script}\\""',
+            shell=True
+        )
+    else:
+        # Linux: try common terminal emulators
+        for term_cmd in [
+            ['gnome-terminal', '--', 'bash', '-c', f'cd {cwd} && python "{script}"; exec bash'],
+            ['xterm', '-e', f'cd {cwd} && python "{script}"; bash'],
+        ]:
+            try:
+                subprocess.Popen(term_cmd)
+                break
+            except FileNotFoundError:
+                continue
+
+    return {"success": True, "scriptPath": request.scriptPath}
 
 
 @app.post("/api/scripts/stop")
@@ -829,7 +880,7 @@ async def get_file_tree():
 
 
 @app.get("/api/files/read")
-async def read_file(path: str):
+async def read_file(path: str, sheet: Optional[str] = None):
     """Read a file's content - streams from disk, doesn't hold data in memory"""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -861,6 +912,61 @@ async def read_file(path: str):
     if ext in dataframe_extensions:
         print(f"[File Read] Parsing dataframe: {path}")
         temp_file_path = None  # Track temp files for cleanup
+        excel_sheet_names = None  # Track Excel sheet names
+        excel_active_sheet = None
+
+        # ── Try metadata first for column names & row count ──
+        # This avoids scanning the file at all for basic info
+        meta_columns = None
+        meta_rows = None
+        try:
+            from vibefoundry.metadata import _metadata_cache
+            cache_key = str(file_path)
+            mtime = file_path.stat().st_mtime
+            if cache_key in _metadata_cache:
+                cached_mtime, cached_rows, cached_cols, cached_info = _metadata_cache[cache_key]
+                if cached_mtime == mtime:
+                    meta_columns = cached_cols
+                    meta_rows = cached_rows
+                    print(f"[File Read] Using cached metadata: {len(meta_columns)} cols, {meta_rows} rows")
+        except Exception:
+            pass
+
+        # Also check the metadata txt files for row/column info
+        if meta_columns is None:
+            try:
+                for meta_name in ("input_metadata.txt", "output_metadata.txt"):
+                    meta_path = state.project_folder / "app_folder" / "meta_data" / meta_name
+                    if meta_path.exists():
+                        meta_text = meta_path.read_text(encoding="utf-8")
+                        # Look for this file's entry in metadata
+                        fname = file_path.name
+                        if f"File: {fname}" in meta_text or str(file_path) in meta_text:
+                            import re
+                            # Extract row count
+                            for line in meta_text.split('\n'):
+                                if fname in line or str(file_path.relative_to(state.project_folder)) in line:
+                                    # Found the file section, scan next lines
+                                    pass
+                            # Parse rows from metadata
+                            sections = meta_text.split("File: ")
+                            for section in sections:
+                                if fname in section or str(file_path) in section:
+                                    rows_match = re.search(r'Rows:\s*(\d+)', section)
+                                    if rows_match:
+                                        meta_rows = int(rows_match.group(1))
+                                    cols_match = re.search(r'Columns\s*\((\d+)\):', section)
+                                    if cols_match:
+                                        # Extract column names from the "    - colname" lines
+                                        col_lines = re.findall(r'^\s+-\s+(.+?)(?:\s+\[.*\])?$', section, re.MULTILINE)
+                                        if col_lines:
+                                            meta_columns = col_lines
+                                    break
+                            if meta_columns:
+                                print(f"[File Read] Using metadata txt: {len(meta_columns)} cols, {meta_rows} rows")
+                                break
+            except Exception:
+                pass
 
         try:
             if ext == '.csv':
@@ -914,11 +1020,54 @@ async def read_file(path: str):
                     df_state.csv_separator = separator
                     df_state.file_type = 'csv'
 
-                    # Get schema and row count efficiently using streaming
+                    # Get schema from a quick scan (only infer from first rows)
                     lf = pl.scan_csv(actual_file_path, separator=separator, infer_schema_length=10000)
                     df_state.columns = lf.collect_schema().names()
                     schema = lf.collect_schema()
-                    df_state.total_rows = lf.select(pl.len()).collect().item()
+
+                    # For massive CSVs, skip the expensive row count and go straight to modal
+                    if is_file_massive(file_path, total_rows=meta_rows or 0):
+                        file_size = file_path.stat().st_size
+                        if meta_rows is not None:
+                            df_state.total_rows = meta_rows
+                        else:
+                            try:
+                                with open(actual_file_path, 'rb') as f:
+                                    sample = f.read(10240)
+                                sample_lines = sample.count(b'\n')
+                                if sample_lines > 0:
+                                    avg_row_bytes = len(sample) / sample_lines
+                                    estimated_rows = int(file_size / avg_row_bytes)
+                                else:
+                                    estimated_rows = 0
+                                df_state.total_rows = estimated_rows
+                            except Exception:
+                                df_state.total_rows = 0
+
+                        col_dtypes = {}
+                        for col in df_state.columns:
+                            dtype = schema.get(col) if hasattr(schema, 'get') else schema[col]
+                            col_dtypes[col] = str(dtype) if dtype else "Unknown"
+
+                        profile_path = get_profile_cache_path(state.project_folder, file_path)
+                        has_valid_profile = is_profile_valid(profile_path, file_path)
+                        print(f"[File Read] MASSIVE CSV detected: {file_path.name} ({file_size / 1024 / 1024:.0f} MB). Profile valid: {has_valid_profile}")
+                        return {
+                            "type": "massive_file",
+                            "filename": file_path.name,
+                            "filePath": path,
+                            "fileSize": file_size,
+                            "columns": df_state.columns,
+                            "totalRows": df_state.total_rows,
+                            "hasProfile": has_valid_profile,
+                            "columnDtypes": col_dtypes,
+                        }
+
+                    # Use metadata row count if available, otherwise count (expensive)
+                    if meta_rows is not None:
+                        df_state.total_rows = meta_rows
+                    else:
+                        df_state.total_rows = lf.select(pl.len()).collect().item()
 
                 except Exception as csv_err:
                     return {"type": "error", "message": f"Could not read CSV file: {csv_err}", "filename": file_path.name}
@@ -930,11 +1079,54 @@ async def read_file(path: str):
                     df_state.file_type = 'parquet'
                     df_state.csv_separator = ','
 
+                    # Get row count cheaply from parquet metadata if not cached
+                    parquet_rows = meta_rows
+                    if parquet_rows is None:
+                        try:
+                            import pyarrow.parquet as pq
+                            parquet_rows = pq.ParquetFile(file_path).metadata.num_rows
+                        except Exception:
+                            parquet_rows = 0
+
+                    # For massive files, use pyarrow metadata to get columns/rows
+                    # without scanning the data — avoids OOM on huge files
+                    if is_file_massive(file_path, total_rows=parquet_rows):
+                        try:
+                            import pyarrow.parquet as pq
+                            pf = pq.ParquetFile(file_path)
+                            arrow_schema = pf.schema_arrow
+                            df_state.columns = [f.name for f in arrow_schema]
+                            df_state.total_rows = pf.metadata.num_rows
+                            schema = {}
+                            for field in arrow_schema:
+                                schema[field.name] = str(field.type)
+                            file_size = file_path.stat().st_size
+                            profile_path = get_profile_cache_path(state.project_folder, file_path)
+                            has_valid_profile = is_profile_valid(profile_path, file_path)
+                            col_dtypes = {col: schema.get(col, "Unknown") for col in df_state.columns}
+                            print(f"[File Read] MASSIVE file detected: {file_path.name} ({file_size / 1024 / 1024:.0f} MB). Profile valid: {has_valid_profile}")
+                            return {
+                                "type": "massive_file",
+                                "filename": file_path.name,
+                                "filePath": path,
+                                "fileSize": file_size,
+                                "columns": df_state.columns,
+                                "totalRows": df_state.total_rows,
+                                "hasProfile": has_valid_profile,
+                                "columnDtypes": col_dtypes,
+                            }
+                        except Exception as pq_err:
+                            return {"type": "error", "message": f"Could not read massive Parquet file metadata: {pq_err}", "filename": file_path.name}
+
                     try:
                         lf = pl.scan_parquet(file_path)
                         df_state.columns = lf.collect_schema().names()
                         schema = lf.collect_schema()
-                        df_state.total_rows = lf.select(pl.len()).collect().item()
+                        # Use metadata row count if available
+                        if meta_rows is not None:
+                            df_state.total_rows = meta_rows
+                        else:
+                            df_state.total_rows = lf.select(pl.len()).collect().item()
                     except Exception:
                         # Fallback to pyarrow (e.g. geoparquet with geometry columns)
                         try:
@@ -957,7 +1149,7 @@ async def read_file(path: str):
 
                             df_state.columns = temp_df.columns
                             schema = temp_df.schema
-                            df_state.total_rows = len(temp_df)
+                            df_state.total_rows = meta_rows if meta_rows is not None else len(temp_df)
                             lf = temp_df.lazy()
                             del temp_df
                         except Exception as pyarrow_err:
@@ -969,11 +1161,21 @@ async def read_file(path: str):
             else:
                 # Excel (.xlsx, .xls)
                 try:
+                    from openpyxl import load_workbook
                     df_state.clear()
                     df_state.file_path = str(file_path)
                     df_state.file_type = 'excel'
                     df_state.csv_separator = ','
-                    temp_df = pl.read_excel(file_path)
+
+                    # Get sheet names
+                    wb = load_workbook(file_path, read_only=True)
+                    excel_sheet_names = wb.sheetnames
+                    wb.close()
+
+                    # Read the requested sheet (or first sheet by default)
+                    excel_active_sheet = sheet if sheet and sheet in excel_sheet_names else excel_sheet_names[0]
+                    target_sheet = excel_active_sheet
+                    temp_df = pl.read_excel(file_path, sheet_name=target_sheet)
                     df_state.columns = temp_df.columns
                     schema = temp_df.schema
                     df_state.total_rows = len(temp_df)
@@ -982,31 +1184,7 @@ async def read_file(path: str):
                 except Exception as excel_err:
                     return {"type": "error", "message": f"Could not read Excel file: {excel_err}. Make sure 'openpyxl' is installed (pip install openpyxl).", "filename": file_path.name}
 
-            # --- Massive file detection ---
-            if is_file_massive(file_path):
-                file_size = file_path.stat().st_size
-                profile_path = get_profile_cache_path(state.project_folder, file_path)
-                has_valid_profile = is_profile_valid(profile_path, file_path)
-
-                # Build column dtypes map
-                col_dtypes = {}
-                for col in df_state.columns:
-                    dtype = schema.get(col) if hasattr(schema, 'get') else schema[col]
-                    col_dtypes[col] = str(dtype) if dtype else "Unknown"
-
-                print(f"[File Read] MASSIVE file detected: {file_path.name} ({file_size / 1024 / 1024:.0f} MB). Profile valid: {has_valid_profile}")
-                return {
-                    "type": "massive_file",
-                    "filename": file_path.name,
-                    "filePath": path,
-                    "fileSize": file_size,
-                    "columns": df_state.columns,
-                    "totalRows": df_state.total_rows,
-                    "hasProfile": has_valid_profile,
-                    "columnDtypes": col_dtypes,
-                }
-
-            # Compute column info — if this fails, still return the data without stats
+            # Compute column info from the full dataset (Polars lazy scan — efficient)
             try:
                 column_info = _compute_full_column_info(lf, df_state.columns, schema)
             except Exception:
@@ -1014,13 +1192,13 @@ async def read_file(path: str):
 
             df_state.column_info = column_info
 
-            # Get first chunk using streaming
+            # Get first chunk for initial preview
             CHUNK_SIZE = 200
             first_chunk, total_rows = df_state.get_rows(0, CHUNK_SIZE)
 
-            print(f"[File Read] Streaming mode: {df_state.total_rows} rows, only loaded {len(first_chunk)}")
+            print(f"[File Read] Fast preview: {df_state.total_rows} total rows, showing {len(first_chunk)}")
 
-            return {
+            result = {
                 "type": "dataframe",
                 "filePath": path,
                 "columns": df_state.columns,
@@ -1031,6 +1209,13 @@ async def read_file(path: str):
                 "limit": CHUNK_SIZE,
                 "filename": file_path.name
             }
+
+            # Include sheet info for Excel files
+            if excel_sheet_names:
+                result["sheetNames"] = excel_sheet_names
+                result["activeSheet"] = excel_active_sheet
+
+            return result
         except Exception as e:
             return {"type": "error", "message": f"Unexpected error reading file: {e}", "filename": file_path.name}
         finally:
@@ -1064,14 +1249,39 @@ async def read_file(path: str):
             return {"type": "json", "data": data, "filename": file_path.name}
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             return {"type": "error", "message": f"Failed to parse JSON: {str(e)}", "filename": file_path.name}
-    elif ext in {'.doc', '.docx'}:
-        # Word documents - return as text type with raw content for display
+    elif ext == '.docx':
+        # Word documents - parse with python-docx
         try:
-            content = file_path.read_text(encoding='utf-8')
-            return {"type": "text", "content": content, "encoding": "utf-8", "filename": file_path.name}
-        except UnicodeDecodeError:
-            # Word docs are binary, show message
-            return {"type": "word", "path": path, "filename": file_path.name, "message": "Word document preview not available. Download to view."}
+            from docx import Document
+            doc = Document(file_path)
+            paragraphs = []
+            for para in doc.paragraphs:
+                style = para.style.name if para.style else ""
+                text = para.text
+                if text.strip():
+                    paragraphs.append({"text": text, "style": style})
+
+            # Also extract tables
+            tables = []
+            for table in doc.tables:
+                rows = []
+                for row in table.rows:
+                    rows.append([cell.text for cell in row.cells])
+                if rows:
+                    tables.append(rows)
+
+            return {
+                "type": "docx",
+                "paragraphs": paragraphs,
+                "tables": tables,
+                "filename": file_path.name
+            }
+        except ImportError:
+            return {"type": "error", "message": "Install python-docx to preview Word files: pip install python-docx", "filename": file_path.name}
+        except Exception as e:
+            return {"type": "error", "message": f"Could not read Word document: {e}", "filename": file_path.name}
+    elif ext == '.doc':
+        return {"type": "unknown", "message": "Legacy .doc format is not supported. Save as .docx to preview.", "filename": file_path.name}
     else:
         try:
             content = file_path.read_text(encoding='utf-8')
@@ -1236,10 +1446,29 @@ async def delete_file(request: DeleteFileRequest):
         raise HTTPException(status_code=404, detail="File not found")
 
     import shutil
+
+    # Collect files to clean up profiles for (before deletion)
+    files_to_clean = []
     if request.isDirectory:
+        for root, _dirs, fnames in os.walk(file_path):
+            for fname in fnames:
+                files_to_clean.append(Path(os.path.join(root, fname)))
         shutil.rmtree(file_path)
     else:
+        files_to_clean.append(file_path)
         file_path.unlink()
+
+    # Remove any cached profile files for the deleted files
+    for f in files_to_clean:
+        profile_path = get_profile_cache_path(state.project_folder, f)
+        if profile_path.exists():
+            profile_path.unlink()
+        meta_json = profile_path.with_suffix(".meta.json")
+        if meta_json.exists():
+            meta_json.unlink()
+
+    # Regenerate metadata so profile files reflect the deletion
+    generate_metadata(state.project_folder)
 
     return {"success": True, "path": request.path}
 
@@ -1276,6 +1505,9 @@ async def rename_file(request: RenameRequest):
 
     import shutil
     shutil.move(str(old_path), str(new_path))
+
+    # Regenerate metadata so profile files reflect the rename
+    generate_metadata(state.project_folder)
 
     return {"success": True, "oldPath": str(old_path), "newPath": str(new_path)}
 
@@ -1314,6 +1546,9 @@ async def move_file(request: MoveRequest):
 
     import shutil
     shutil.move(str(source_path), str(dest_path))
+
+    # Regenerate metadata so profile files reflect the move
+    generate_metadata(state.project_folder)
 
     return {"success": True, "sourcePath": str(source_path), "destPath": str(dest_path)}
 
@@ -2141,7 +2376,7 @@ async def serve_index():
     return FileResponse(index_path)
 
 
-# Serve root-level static files (icon.svg, etc.)
+# Serve root-level static files (icon.svg, manifest.json, sw.js, etc.)
 @app.get("/icon.svg")
 async def serve_icon():
     """Serve the favicon SVG"""
@@ -2150,6 +2385,42 @@ async def serve_icon():
     if icon_path.exists():
         return FileResponse(icon_path, media_type="image/svg+xml")
     return JSONResponse(status_code=404, content={"error": "icon.svg not found"})
+
+
+@app.get("/icon-192.png")
+async def serve_icon_192():
+    static_dir = get_static_dir()
+    path = static_dir / "icon-192.png"
+    if path.exists():
+        return FileResponse(path, media_type="image/png")
+    return JSONResponse(status_code=404, content={"error": "icon-192.png not found"})
+
+
+@app.get("/icon-512.png")
+async def serve_icon_512():
+    static_dir = get_static_dir()
+    path = static_dir / "icon-512.png"
+    if path.exists():
+        return FileResponse(path, media_type="image/png")
+    return JSONResponse(status_code=404, content={"error": "icon-512.png not found"})
+
+
+@app.get("/manifest.json")
+async def serve_manifest():
+    static_dir = get_static_dir()
+    path = static_dir / "manifest.json"
+    if path.exists():
+        return FileResponse(path, media_type="application/manifest+json")
+    return JSONResponse(status_code=404, content={"error": "manifest.json not found"})
+
+
+@app.get("/sw.js")
+async def serve_service_worker():
+    static_dir = get_static_dir()
+    path = static_dir / "sw.js"
+    if path.exists():
+        return FileResponse(path, media_type="application/javascript")
+    return JSONResponse(status_code=404, content={"error": "sw.js not found"})
 
 
 # Mount static files for assets (at module load time)

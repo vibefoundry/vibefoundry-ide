@@ -45,6 +45,20 @@ const MarkdownIcon = () => (
   </svg>
 )
 
+const WordIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="tree-item-icon file word">
+    <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
+    <path d="M4.113 12.016L3.077 7.27h.95l.607 3.073.627-3.073h.95L6.838 10.3l.606-3.029h.95l-1.038 4.746h-.952L5.738 8.67l-.673 3.347h-.952z" fillRule="evenodd"/>
+  </svg>
+)
+
+const ImageIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="tree-item-icon file image">
+    <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
+    <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/>
+  </svg>
+)
+
 const DefaultFileIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="tree-item-icon file default">
     <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
@@ -70,6 +84,12 @@ const FileIcon = ({ extension, isDirectory }) => {
   if (['.md', '.mdx'].includes(ext)) {
     return <MarkdownIcon />
   }
+  if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp', '.svg', '.tiff', '.tif'].includes(ext)) {
+    return <ImageIcon />
+  }
+  if (['.docx', '.doc'].includes(ext)) {
+    return <WordIcon />
+  }
   if (['.js', '.jsx', '.ts', '.tsx', '.html', '.css', '.scss', '.sql', '.sh', '.yaml', '.yml', '.toml'].includes(ext)) {
     return <CodeIcon />
   }
@@ -80,7 +100,9 @@ const FileIcon = ({ extension, isDirectory }) => {
 const TreeNode = ({
   node,
   onFileSelect,
+  onFileClick,
   selectedPath,
+  multiSelectedPaths,
   depth = 0,
   newPaths,
   modifiedPaths,
@@ -125,13 +147,28 @@ const TreeNode = ({
     }
   }, [isRenaming])
 
-  const handleClick = () => {
+  const handleClick = (e) => {
     if (isRenaming) return
-    if (isCodespaceBridge) return // Don't allow clicking on codespace_bridge
+    if (isCodespaceBridge) return
+    if (onFileClick) {
+      onFileClick(node, e)
+    } else if (!node.isDirectory) {
+      onFileSelect(node)
+    }
+  }
+
+  const handleDoubleClick = (e) => {
+    if (isRenaming) return
+    if (isCodespaceBridge) return
     if (node.isDirectory) {
       onToggleExpand(node.path)
-    } else {
-      onFileSelect(node)
+    }
+  }
+
+  const handleToggleClick = (e) => {
+    e.stopPropagation()
+    if (node.isDirectory) {
+      onToggleExpand(node.path)
     }
   }
 
@@ -214,15 +251,16 @@ const TreeNode = ({
     onDragEnd()
   }
 
-  const isSelected = selectedPath === node.path
+  const isSelected = selectedPath === node.path || (multiSelectedPaths && multiSelectedPaths.has(node.path))
 
   return (
     <div>
       <div
         ref={itemRef}
         className={`tree-item ${isSelected ? 'selected' : ''} ${isNew ? 'new-item' : ''} ${isModified ? 'modified-item' : ''} ${isDragging ? 'dragging' : ''} ${isDropTarget ? 'drop-target' : ''} ${isCodespaceBridge ? 'locked' : ''}`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{ paddingLeft: `${depth * 20 + 8}px` }}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         onAnimationEnd={onAnimationEnd}
         draggable={canWrite && !isRenaming && !isCodespaceBridge}
@@ -235,7 +273,7 @@ const TreeNode = ({
         data-path={node.path}
       >
         {node.isDirectory && (
-          <span className="tree-toggle">{isExpanded ? '▼' : '▶'}</span>
+          <span className="tree-toggle" onClick={handleToggleClick}>{isExpanded ? '▼' : '▶'}</span>
         )}
         {!node.isDirectory && <span className="tree-toggle"></span>}
         <FileIcon extension={node.extension} isDirectory={node.isDirectory} />
@@ -264,12 +302,15 @@ const TreeNode = ({
       </div>
       {node.isDirectory && isExpanded && node.children && (
         <div className="tree-children">
+          <div className="tree-guide-line" style={{ left: `${depth * 20 + 16}px` }} />
           {node.children.map((child, index) => (
             <TreeNode
               key={child.path || index}
               node={child}
               onFileSelect={onFileSelect}
+              onFileClick={onFileClick}
               selectedPath={selectedPath}
+              multiSelectedPaths={multiSelectedPaths}
               depth={depth + 1}
               newPaths={newPaths}
               modifiedPaths={modifiedPaths}
@@ -337,7 +378,7 @@ const TrashIcon = () => (
 )
 
 // Context Menu Component
-const ContextMenu = ({ x, y, node, onClose, onAction, canWrite }) => {
+const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) => {
   const menuRef = useRef(null)
   const [copied, setCopied] = useState(false)
   const [position, setPosition] = useState({ x, y })
@@ -383,10 +424,17 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [onClose])
 
-  const isPythonFile = !node.isDirectory && node.extension?.toLowerCase() === '.py'
+  const ext = node.extension?.toLowerCase()
+  const isRunnable = !node.isDirectory && ['.py', '.sh', '.bat'].includes(ext)
 
   const handleCopyRunCommand = async () => {
-    const command = `python ${node.name}`
+    const absPath = projectPath ? `${projectPath}/${node.path}` : node.path
+    let command
+    if (ext === '.py') command = `python "${absPath}"`
+    else if (ext === '.sh') command = `bash "${absPath}"`
+    else if (ext === '.bat') command = `"${absPath}"`
+    else return
+
     try {
       await navigator.clipboard.writeText(command)
       setCopied(true)
@@ -399,7 +447,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite }) => {
   }
 
   // Show run command option for Python files even in read-only mode
-  if (!canWrite && !isPythonFile) {
+  if (!canWrite && !isRunnable) {
     return createPortal(
       <div
         ref={menuRef}
@@ -421,7 +469,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite }) => {
       style={{ left: position.x, top: position.y }}
     >
       {/* Run command for Python files */}
-      {isPythonFile && (
+      {isRunnable && (
         <>
           <div className="context-menu-item" onClick={handleCopyRunCommand}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -525,13 +573,18 @@ const NewItemDialog = ({ type, parentPath, onSubmit, onCancel }) => {
 
 // Delete Confirmation Dialog
 const DeleteDialog = ({ node, onConfirm, onCancel }) => {
-  if (!node || !node.name) return null
+  if (!node || !node.path) return null
+  const multiCount = node.multiPaths ? node.multiPaths.length : 0
   return createPortal(
     <div className="dialog-overlay" onClick={onCancel}>
       <div className="dialog" onClick={e => e.stopPropagation()}>
-        <h3>Delete {node.isDirectory ? 'Folder' : 'File'}</h3>
-        <p>Are you sure you want to delete <strong>{node.name}</strong>?</p>
-        {node.isDirectory && <p className="dialog-warning">This will delete all contents inside the folder.</p>}
+        <h3>Delete {multiCount > 1 ? `${multiCount} Items` : (node.isDirectory ? 'Folder' : 'File')}</h3>
+        {multiCount > 1 ? (
+          <p>Are you sure you want to delete <strong>{multiCount} selected items</strong>?</p>
+        ) : (
+          <p>Are you sure you want to delete <strong>{node.name}</strong>?</p>
+        )}
+        {(node.isDirectory || multiCount > 1) && <p className="dialog-warning">This will delete all contents inside any selected folders.</p>}
         <div className="dialog-actions">
           <button className="dialog-btn cancel" onClick={onCancel}>Cancel</button>
           <button className="dialog-btn danger" onClick={onConfirm}>Delete</button>
@@ -564,6 +617,7 @@ const FileTree = ({
   onRefresh,
   suppressAnimationsRef,
   isConnected,
+  projectPath,
   // Optional controlled expanded paths (for preserving state across re-renders)
   controlledExpandedPaths,
   onExpandedPathsChange
@@ -586,6 +640,8 @@ const FileTree = ({
   const [draggedPath, setDraggedPath] = useState(null)
   const [draggedNode, setDraggedNode] = useState(null)
   const [dropTargetPath, setDropTargetPath] = useState(null)
+  const [multiSelectedPaths, setMultiSelectedPaths] = useState(new Set())
+  const lastClickedPathRef = useRef(null)
   const prevPathsRef = useRef(new Set())
   const prevModTimesRef = useRef(new Map())
   const prevTreeRef = useRef(null)
@@ -598,6 +654,46 @@ const FileTree = ({
   const registerRef = useCallback((path, element) => {
     elementRefs.current.set(path, element)
   }, [])
+
+  // Flatten visible paths in display order (for shift-click range selection)
+  const getVisiblePaths = useCallback(() => {
+    const paths = []
+    const walk = (nodes) => {
+      if (!nodes) return
+      for (const node of nodes) {
+        paths.push(node.path)
+        if (node.isDirectory && expandedPaths.has(node.path) && node.children) {
+          walk(node.children)
+        }
+      }
+    }
+    walk(tree)
+    return paths
+  }, [tree, expandedPaths])
+
+  const handleFileClick = useCallback((node, e) => {
+    if (e.shiftKey && lastClickedPathRef.current) {
+      // Shift-click: select range between last clicked and current
+      const visiblePaths = getVisiblePaths()
+      const lastIdx = visiblePaths.indexOf(lastClickedPathRef.current)
+      const currentIdx = visiblePaths.indexOf(node.path)
+      if (lastIdx !== -1 && currentIdx !== -1) {
+        const start = Math.min(lastIdx, currentIdx)
+        const end = Math.max(lastIdx, currentIdx)
+        const rangePaths = visiblePaths.slice(start, end + 1)
+        setMultiSelectedPaths(new Set(rangePaths))
+        // Don't open any file — just highlight the range
+        return
+      }
+    }
+
+    // Normal click: clear multi-select, set last clicked
+    setMultiSelectedPaths(new Set())
+    lastClickedPathRef.current = node.path
+    if (!node.isDirectory) {
+      onFileSelect(node)
+    }
+  }, [getVisiblePaths, onFileSelect])
 
   const onToggleExpand = useCallback((path) => {
     setExpandedPaths(prev => {
@@ -620,15 +716,19 @@ const FileTree = ({
     })
   }, [])
 
+  // Folders that should never auto-expand
+  const NEVER_AUTO_EXPAND = ['meta_data']
+
   useEffect(() => {
     if (tree.length > 0 && expandedPaths.size === 0) {
       const root = tree[0]
       if (root?.path) {
         const paths = new Set([root.path])
         // Also expand top-level children (app_folder, input_folder, output_folder, etc.)
+        // but never meta_data
         if (root.children) {
           for (const child of root.children) {
-            if (child.isDirectory) {
+            if (child.isDirectory && !NEVER_AUTO_EXPAND.includes(child.name)) {
               paths.add(child.path)
             }
           }
@@ -674,7 +774,12 @@ const FileTree = ({
         break
 
       case 'delete':
-        setDeleteDialog(node)
+        // If the right-clicked node is part of a multi-selection, delete all selected
+        if (multiSelectedPaths.size > 1 && multiSelectedPaths.has(node.path)) {
+          setDeleteDialog({ path: node.path, isDirectory: node.isDirectory, multiPaths: [...multiSelectedPaths] })
+        } else {
+          setDeleteDialog(node)
+        }
         break
 
       case 'newFolder':
@@ -841,20 +946,43 @@ const FileTree = ({
     if (!deleteDialog || !deleteDialog.path) return
 
     try {
-      const response = await fetch('/api/files/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: deleteDialog.path,
-          isDirectory: deleteDialog.isDirectory
-        })
-      })
+      const rawPaths = deleteDialog.multiPaths || [deleteDialog.path]
 
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Delete failed')
+      // Filter out paths whose parent folder is already being deleted
+      const pathsToDelete = rawPaths.filter(p =>
+        !rawPaths.some(other => other !== p && p.startsWith(other + '/'))
+      )
+
+      for (const pathToDelete of pathsToDelete) {
+        // Determine if it's a directory by checking the tree
+        const findNode = (nodes, target) => {
+          for (const n of nodes) {
+            if (n.path === target) return n
+            if (n.children) {
+              const found = findNode(n.children, target)
+              if (found) return found
+            }
+          }
+          return null
+        }
+        const targetNode = findNode(tree, pathToDelete)
+
+        const response = await fetch('/api/files/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: pathToDelete,
+            isDirectory: targetNode ? targetNode.isDirectory : false
+          })
+        })
+
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.detail || `Delete failed: ${pathToDelete}`)
+        }
       }
 
+      setMultiSelectedPaths(new Set())
       if (onRefresh) onRefresh()
     } catch (err) {
       console.error('Delete failed:', err)
@@ -905,18 +1033,41 @@ const FileTree = ({
       // Suppress notifications during move
       isMovingRef.current = true
 
-      // Use backend API for move
-      const destPath = `${targetNode.path}/${draggedNode.name}`
-      const response = await fetch('/api/files/move', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourcePath: draggedNode.path, destPath })
-      })
-      if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Move failed')
+      // If dragged node is part of multi-selection, move all selected items
+      const pathsToMove = (multiSelectedPaths.size > 1 && multiSelectedPaths.has(draggedNode.path))
+        ? [...multiSelectedPaths]
+        : [draggedNode.path]
+
+      // Find node names for each path
+      const findNode = (nodes, target) => {
+        for (const n of nodes) {
+          if (n.path === target) return n
+          if (n.children) {
+            const found = findNode(n.children, target)
+            if (found) return found
+          }
+        }
+        return null
       }
 
+      for (const sourcePath of pathsToMove) {
+        // Skip if trying to move into itself
+        if (targetNode.path === sourcePath || targetNode.path.startsWith(sourcePath + '/')) continue
+        const sourceNode = findNode(tree, sourcePath)
+        if (!sourceNode) continue
+        const destPath = `${targetNode.path}/${sourceNode.name}`
+        const response = await fetch('/api/files/move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sourcePath, destPath })
+        })
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.detail || `Move failed: ${sourcePath}`)
+        }
+      }
+
+      setMultiSelectedPaths(new Set())
       if (onRefresh) onRefresh()
 
       // Reset after a short delay to allow tree update
@@ -930,7 +1081,7 @@ const FileTree = ({
     }
 
     handleDragEnd()
-  }, [draggedNode, onRefresh, handleDragEnd])
+  }, [draggedNode, multiSelectedPaths, tree, onRefresh, handleDragEnd])
 
   useEffect(() => {
     const { paths: currentPaths, modTimes: currentModTimes } = collectPathsWithMeta(tree)
@@ -1014,7 +1165,10 @@ const FileTree = ({
       for (const path of addedPaths) {
         const node = findNodeByPath(tree, path)
         if (node) {
-          expandToPath(path)
+          // Never auto-expand into meta_data
+          if (!path.includes('/meta_data/') && !path.endsWith('/meta_data')) {
+            expandToPath(path)
+          }
           newNotifications.push({
             id: Math.random().toString(36).substr(2, 9),
             path: path,
@@ -1035,7 +1189,10 @@ const FileTree = ({
       for (const path of modifiedPaths) {
         const node = findNodeByPath(tree, path)
         if (node) {
-          expandToPath(path)
+          // Never auto-expand into meta_data
+          if (!path.includes('/meta_data/') && !path.endsWith('/meta_data')) {
+            expandToPath(path)
+          }
           newNotifications.push({
             id: Math.random().toString(36).substr(2, 9),
             path: path,
@@ -1129,6 +1286,7 @@ const FileTree = ({
           onClose={closeContextMenu}
           onAction={handleContextAction}
           canWrite={canWrite}
+          projectPath={projectPath}
         />
       )}
 
@@ -1219,7 +1377,9 @@ const FileTree = ({
           key={node.path || index}
           node={node}
           onFileSelect={onFileSelect}
+          onFileClick={handleFileClick}
           selectedPath={selectedPath}
+          multiSelectedPaths={multiSelectedPaths}
           depth={0}
           newPaths={newPaths}
           modifiedPaths={modifiedPathsState}

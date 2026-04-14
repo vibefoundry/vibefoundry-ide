@@ -579,7 +579,16 @@ function App() {
             filePath: data.filePath,
             totalRows: data.totalRows,
             offset: data.offset,
-            limit: data.limit
+            limit: data.limit,
+            sheetNames: data.sheetNames || null,
+            activeSheet: data.activeSheet || null
+          })
+        } else if (data.type === 'docx') {
+          setFileContent({
+            type: 'docx',
+            paragraphs: data.paragraphs,
+            tables: data.tables,
+            filename: data.filename
           })
         } else if (data.type === 'image') {
           // Image - backend returns path for direct serving
@@ -606,6 +615,37 @@ function App() {
     } catch (err) {
       console.error('Failed to read file:', err)
       setFileContent({ type: 'error', message: 'Failed to read file' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Switch Excel sheet
+  const handleSheetChange = async (sheetName) => {
+    if (!selectedFile?.path) return
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/files/read?path=${encodeURIComponent(selectedFile.path)}&sheet=${encodeURIComponent(sheetName)}`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.type === 'dataframe') {
+          setFileContent({
+            type: 'dataframe',
+            columns: data.columns,
+            columnInfo: data.columnInfo,
+            data: data.data,
+            filename: data.filename,
+            filePath: data.filePath,
+            totalRows: data.totalRows,
+            offset: data.offset,
+            limit: data.limit,
+            sheetNames: data.sheetNames || null,
+            activeSheet: data.activeSheet || null
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Failed to switch sheet:', err)
     } finally {
       setLoading(false)
     }
@@ -1035,6 +1075,7 @@ function App() {
                   onRefresh={handleRefresh}
                   suppressAnimationsRef={suppressAnimationsRef}
                   isConnected={syncConnection.isConnected}
+                  projectPath={projectPath}
                 />
               ) : (
                 <div className="codespace-file-list">
@@ -1129,6 +1170,7 @@ function App() {
               content={fileContent}
               canWrite={canWrite && !!selectedFile?.path}
               onSave={handleFileSave}
+              onSheetChange={handleSheetChange}
               saveStatus={saveStatus}
               onLargeFilePreviewReady={(data) => {
                 setFileContent({
