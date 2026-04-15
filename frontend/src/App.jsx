@@ -598,6 +598,12 @@ function App() {
             filename: data.filename,
             extension: data.extension
           })
+        } else if (data.type === 'json') {
+          setFileContent({
+            type: 'json',
+            data: data.data,
+            filename: data.filename
+          })
         } else {
           const fileType = getFileType(file.name)
           const extension = getExtension(file.name)

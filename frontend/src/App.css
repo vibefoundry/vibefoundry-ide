@@ -514,6 +514,48 @@ body {
   position: relative;
 }
 
+.upload-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.upload-overlay-content {
+  background: white;
+  border-radius: 12px;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.upload-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.upload-overlay-text {
+  font-size: 14px;
+  color: var(--color-text);
+  text-align: center;
+  max-width: 300px;
+  word-break: break-word;
+}
+
 .tree-toggle {
   width: 16px;
   min-width: 16px;

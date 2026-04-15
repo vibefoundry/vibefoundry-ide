@@ -1025,45 +1025,9 @@ async def read_file(path: str, sheet: Optional[str] = None):
                     df_state.columns = lf.collect_schema().names()
                     schema = lf.collect_schema()
 
-                    # For massive CSVs, skip the expensive row count and go straight to modal
-                    if is_file_massive(file_path, total_rows=meta_rows or 0):
-                        file_size = file_path.stat().st_size
-                        if meta_rows is not None:
-                            df_state.total_rows = meta_rows
-                        else:
-                            try:
-                                with open(actual_file_path, 'rb') as f:
-                                    sample = f.read(10240)
-                                sample_lines = sample.count(b'\n')
-                                if sample_lines > 0:
-                                    avg_row_bytes = len(sample) / sample_lines
-                                    estimated_rows = int(file_size / avg_row_bytes)
-                                else:
-                                    estimated_rows = 0
-                                df_state.total_rows = estimated_rows
-                            except Exception:
-                                df_state.total_rows = 0
-
-                        col_dtypes = {}
-                        for col in df_state.columns:
-                            dtype = schema.get(col) if hasattr(schema, 'get') else schema[col]
-                            col_dtypes[col] = str(dtype) if dtype else "Unknown"
-
-                        profile_path = get_profile_cache_path(state.project_folder, file_path)
-                        has_valid_profile = is_profile_valid(profile_path, file_path)
-                        print(f"[File Read] MASSIVE CSV detected: {file_path.name} ({file_size / 1024 / 1024:.0f} MB). Profile valid: {has_valid_profile}")
-                        return {
-                            "type": "massive_file",
-                            "filename": file_path.name,
-                            "filePath": path,
-                            "fileSize": file_size,
-                            "columns": df_state.columns,
-                            "totalRows": df_state.total_rows,
-                            "hasProfile": has_valid_profile,
-                            "columnDtypes": col_dtypes,
-                        }
-
-                    # Use metadata row count if available, otherwise count (expensive)
+                    # CSVs never go through massive file filtering — they get auto-converted
+                    # to Parquet on upload if >50MB. Just load normally.
+                    # Use metadata row count if available, otherwise count
                     if meta_rows is not None:
                         df_state.total_rows = meta_rows
                     else:
@@ -1353,7 +1317,7 @@ async def write_file(request: WriteFileRequest):
     return {"success": True, "path": request.path}
 
 
-CSV_TO_PARQUET_THRESHOLD = 100 * 1024 * 1024  # 100MB
+CSV_TO_PARQUET_THRESHOLD = 50 * 1024 * 1024  # 50MB
 UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
 
 
@@ -1363,7 +1327,7 @@ async def upload_file(
     folder: str = Form(...)
 ):
     """Upload a binary file to a folder, streaming to disk in chunks.
-    Large CSVs (>100MB) are auto-converted to Parquet."""
+    Large CSVs (>50MB) are auto-converted to Parquet."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
@@ -1403,7 +1367,7 @@ async def upload_file(
         elif target_path.exists():
             try:
                 print(f"[Upload] Converting large CSV to Parquet: {target_path.name} ({bytes_written / 1024 / 1024:.1f} MB)")
-                pl.scan_csv(str(target_path)).sink_parquet(str(parquet_path))
+                pl.scan_csv(str(target_path), infer_schema_length=10000, null_values=["null", "NULL", "None", ""]).sink_parquet(str(parquet_path))
                 target_path.unlink()  # Delete original CSV
                 final_path = parquet_path
                 converted = True

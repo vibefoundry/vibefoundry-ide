@@ -137,8 +137,16 @@ def profile_large_file(
     lf = _get_lazy_frame(file_path, file_type, separator)
     numeric_cols, categorical_cols = _classify_columns(lf)
 
-    # Count total rows (cheap for Parquet — reads footer metadata)
-    total_rows = lf.select(pl.len()).collect().item()
+    # Count total rows — cheap for Parquet (footer), fast estimate for CSV (byte counting)
+    if file_type == "csv":
+        # Fast: count newlines without parsing
+        count = 0
+        with open(file_path, 'rb') as f:
+            for buf in iter(lambda: f.read(1024 * 1024), b''):
+                count += buf.count(b'\n')
+        total_rows = max(0, count - 1)  # subtract header
+    else:
+        total_rows = lf.select(pl.len()).collect().item()
     total_chunks = max(1, (total_rows + CHUNK_ROWS - 1) // CHUNK_ROWS)
 
     profile_path = get_profile_cache_path(project_folder, file_path)

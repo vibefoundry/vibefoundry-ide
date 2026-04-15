@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
-CSV_TO_PARQUET_THRESHOLD = 100 * 1024 * 1024  # 100MB
+CSV_TO_PARQUET_THRESHOLD = 50 * 1024 * 1024  # 50MB
 
 # Try to import watchdog, fall back to polling if not available
 try:
@@ -169,7 +169,7 @@ class FileWatcher:
 
             parquet_path = csv_path.with_suffix(".parquet")
             print(f"[Watcher] Auto-converting large CSV to Parquet: {csv_path.name} ({file_size / 1024 / 1024:.1f} MB)")
-            pl.scan_csv(str(csv_path)).sink_parquet(str(parquet_path))
+            pl.scan_csv(str(csv_path), infer_schema_length=10000, null_values=["null", "NULL", "None", ""]).sink_parquet(str(parquet_path))
             csv_path.unlink()
             print(f"[Watcher] Conversion complete: {parquet_path.name}")
         except Exception as e:

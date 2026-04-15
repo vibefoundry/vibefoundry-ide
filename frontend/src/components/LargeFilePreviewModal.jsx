@@ -306,6 +306,16 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
             </div>
           )}
 
+          {/* FILTERING - loading profile */}
+          {stage === 'filtering' && !profile && (
+            <div className="lfp-profiling">
+              <div className="lfp-file-info">
+                <span className="lfp-filename">{content.filename}</span>
+              </div>
+              <p className="lfp-desc">Loading filter options...</p>
+            </div>
+          )}
+
           {/* FILTERING */}
           {stage === 'filtering' && profile && (
             <div className="lfp-filtering">

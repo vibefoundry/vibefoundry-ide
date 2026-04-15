@@ -162,6 +162,25 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
     }
   }, [filePath])
 
+  // Adjust filter dropdown position to stay within viewport
+  useEffect(() => {
+    if (!activeFilter || !dropdownRef.current) return
+    const el = dropdownRef.current
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    let { x, y } = dropdownPosition
+    if (rect.right > vw) {
+      x = Math.max(0, vw - rect.width - 8)
+    }
+    if (rect.bottom > vh) {
+      y = Math.max(0, vh - rect.height - 8)
+    }
+    if (x !== dropdownPosition.x || y !== dropdownPosition.y) {
+      setDropdownPosition({ x, y })
+    }
+  }, [activeFilter])
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {

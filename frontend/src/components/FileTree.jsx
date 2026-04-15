@@ -152,8 +152,6 @@ const TreeNode = ({
     if (isCodespaceBridge) return
     if (onFileClick) {
       onFileClick(node, e)
-    } else if (!node.isDirectory) {
-      onFileSelect(node)
     }
   }
 
@@ -162,6 +160,8 @@ const TreeNode = ({
     if (isCodespaceBridge) return
     if (node.isDirectory) {
       onToggleExpand(node.path)
+    } else {
+      onFileSelect(node)
     }
   }
 
@@ -637,10 +637,12 @@ const FileTree = ({
   const [renameValue, setRenameValue] = useState('')
   const [newItemDialog, setNewItemDialog] = useState(null)
   const [deleteDialog, setDeleteDialog] = useState(null)
+  const [uploadStatus, setUploadStatus] = useState(null) // { uploading: bool, converting: bool, filename: str }
   const [draggedPath, setDraggedPath] = useState(null)
   const [draggedNode, setDraggedNode] = useState(null)
   const [dropTargetPath, setDropTargetPath] = useState(null)
   const [multiSelectedPaths, setMultiSelectedPaths] = useState(new Set())
+  const [clickedPath, setClickedPath] = useState(null)
   const lastClickedPathRef = useRef(null)
   const prevPathsRef = useRef(new Set())
   const prevModTimesRef = useRef(new Map())
@@ -687,13 +689,11 @@ const FileTree = ({
       }
     }
 
-    // Normal click: clear multi-select, set last clicked
+    // Normal click: clear multi-select, set last clicked (preview is double-click only)
     setMultiSelectedPaths(new Set())
+    setClickedPath(node.path)
     lastClickedPathRef.current = node.path
-    if (!node.isDirectory) {
-      onFileSelect(node)
-    }
-  }, [getVisiblePaths, onFileSelect])
+  }, [getVisiblePaths])
 
   const onToggleExpand = useCallback((path) => {
     setExpandedPaths(prev => {
@@ -832,6 +832,11 @@ const FileTree = ({
 
             try {
               for (const file of files) {
+                const willConvert = file.size > 50 * 1024 * 1024 && /\.csv$/i.test(file.name)
+                if (willConvert) {
+                  setUploadStatus({ converting: true, filename: file.name })
+                }
+
                 const formData = new FormData()
                 formData.append('file', file)
                 formData.append('folder', node.path)
@@ -847,10 +852,12 @@ const FileTree = ({
                 }
               }
 
+              setUploadStatus(null)
               // Expand the folder and refresh
               setExpandedPaths(prev => new Set([...prev, node.path]))
               if (onRefresh) onRefresh()
             } catch (err) {
+              setUploadStatus(null)
               console.error('Upload failed:', err)
               alert('Failed to upload: ' + err.message)
             }
@@ -1378,7 +1385,7 @@ const FileTree = ({
           node={node}
           onFileSelect={onFileSelect}
           onFileClick={handleFileClick}
-          selectedPath={selectedPath}
+          selectedPath={clickedPath || selectedPath}
           multiSelectedPaths={multiSelectedPaths}
           depth={0}
           newPaths={newPaths}
@@ -1402,6 +1409,21 @@ const FileTree = ({
           isConnected={isConnected}
         />
       ))}
+
+      {/* Upload / Converting overlay - portal to body so it escapes sidebar stacking context */}
+      {uploadStatus && createPortal(
+        <div className="upload-overlay">
+          <div className="upload-overlay-content">
+            <div className="upload-spinner" />
+            <div className="upload-overlay-text">
+              {uploadStatus.converting
+                ? `Converting ${uploadStatus.filename} to Parquet...`
+                : `Loading ${uploadStatus.filename} into folder...`}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
