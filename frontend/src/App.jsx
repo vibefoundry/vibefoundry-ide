@@ -82,29 +82,37 @@ function App() {
 
   const handleResizeStart = useCallback((e) => {
     e.preventDefault()
+    const handle = e.currentTarget
+    const pointerId = e.pointerId
+    // Pointer capture routes all subsequent pointer events to `handle` at the
+    // browser dispatch level — works across iframes and the Chrome PDF plugin.
+    try { handle.setPointerCapture(pointerId) } catch {}
     isResizingRef.current = true
     setIsResizing(true)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
-    const handleResizeMove = (e) => {
+    const onMove = (ev) => {
       if (!isResizingRef.current) return
-      e.preventDefault()
-      const newWidth = Math.max(200, Math.min(600, e.clientX))
+      ev.preventDefault()
+      const newWidth = Math.max(200, Math.min(600, ev.clientX))
       setSidebarWidth(newWidth)
     }
 
-    const handleResizeEnd = () => {
+    const onEnd = () => {
       isResizingRef.current = false
       setIsResizing(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleResizeMove)
-      document.removeEventListener('mouseup', handleResizeEnd)
+      try { handle.releasePointerCapture(pointerId) } catch {}
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onEnd)
+      handle.removeEventListener('pointercancel', onEnd)
     }
 
-    document.addEventListener('mousemove', handleResizeMove)
-    document.addEventListener('mouseup', handleResizeEnd)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onEnd)
+    handle.addEventListener('pointercancel', onEnd)
   }, [])
 
   // Script runner resize handler
@@ -112,6 +120,9 @@ function App() {
 
   const handleScriptRunnerResizeStart = useCallback((e) => {
     e.preventDefault()
+    const handle = e.currentTarget
+    const pointerId = e.pointerId
+    try { handle.setPointerCapture(pointerId) } catch {}
     isResizingScriptRunnerRef.current = true
     setIsResizingScriptRunner(true)
     document.body.style.cursor = 'ns-resize'
@@ -120,25 +131,28 @@ function App() {
     const startY = e.clientY
     const startHeight = scriptRunnerHeight || (mainContentRef.current?.clientHeight / 4) || 200
 
-    const handleResizeMove = (e) => {
+    const onMove = (ev) => {
       if (!isResizingScriptRunnerRef.current) return
-      e.preventDefault()
-      const deltaY = startY - e.clientY
+      ev.preventDefault()
+      const deltaY = startY - ev.clientY
       const newHeight = Math.max(100, Math.min(600, startHeight + deltaY))
       setScriptRunnerHeight(newHeight)
     }
 
-    const handleResizeEnd = () => {
+    const onEnd = () => {
       isResizingScriptRunnerRef.current = false
       setIsResizingScriptRunner(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleResizeMove)
-      document.removeEventListener('mouseup', handleResizeEnd)
+      try { handle.releasePointerCapture(pointerId) } catch {}
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onEnd)
+      handle.removeEventListener('pointercancel', onEnd)
     }
 
-    document.addEventListener('mousemove', handleResizeMove)
-    document.addEventListener('mouseup', handleResizeEnd)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onEnd)
+    handle.addEventListener('pointercancel', onEnd)
   }, [scriptRunnerHeight])
 
   // Terminal pane resize handler
@@ -146,29 +160,35 @@ function App() {
 
   const handleTerminalResizeStart = useCallback((e) => {
     e.preventDefault()
+    const handle = e.currentTarget
+    const pointerId = e.pointerId
+    try { handle.setPointerCapture(pointerId) } catch {}
     isResizingTerminalRef.current = true
     setIsResizingTerminal(true)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
 
-    const handleResizeMove = (e) => {
+    const onMove = (ev) => {
       if (!isResizingTerminalRef.current) return
-      e.preventDefault()
-      const newWidth = Math.max(400, Math.min(1200, window.innerWidth - e.clientX))
+      ev.preventDefault()
+      const newWidth = Math.max(400, Math.min(1200, window.innerWidth - ev.clientX))
       setTerminalWidth(newWidth)
     }
 
-    const handleResizeEnd = () => {
+    const onEnd = () => {
       isResizingTerminalRef.current = false
       setIsResizingTerminal(false)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleResizeMove)
-      document.removeEventListener('mouseup', handleResizeEnd)
+      try { handle.releasePointerCapture(pointerId) } catch {}
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onEnd)
+      handle.removeEventListener('pointercancel', onEnd)
     }
 
-    document.addEventListener('mousemove', handleResizeMove)
-    document.addEventListener('mouseup', handleResizeEnd)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onEnd)
+    handle.addEventListener('pointercancel', onEnd)
   }, [])
 
   // Terminal modal drag handler
@@ -1136,7 +1156,7 @@ function App() {
               </div>
             )}
           </div>
-          <div className="resize-handle" onMouseDown={handleResizeStart} />
+          <div className="resize-handle" onPointerDown={handleResizeStart} />
         </div>
 
         <div className="main-content" ref={mainContentRef}>
@@ -1235,7 +1255,7 @@ function App() {
             <>
               <div
                 className="script-runner-resize-handle"
-                onMouseDown={handleScriptRunnerResizeStart}
+                onPointerDown={handleScriptRunnerResizeStart}
               />
               <ScriptRunner
                 folderName={folderName}
@@ -1252,7 +1272,7 @@ function App() {
           <>
             <div
               className="terminal-pane-resize-handle"
-              onMouseDown={handleTerminalResizeStart}
+              onPointerDown={handleTerminalResizeStart}
             />
             <div className="terminal-pane" style={{ width: terminalWidth }}>
               {/* Terminal pane header with close button */}
