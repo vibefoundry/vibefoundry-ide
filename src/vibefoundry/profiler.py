@@ -225,10 +225,13 @@ def profile_large_file(
         if chunk_stats_rows:
             stats_df = pl.DataFrame(chunk_stats_rows)
 
-            # Append to temp Parquet on disk
+            # Append to temp Parquet on disk.
+            # memory_map=False is required on Windows: the default mmap stays
+            # alive through pl.concat, blocking the subsequent overwrite with
+            # OSError 1224 ("file with a user-mapped section open").
             if temp_profile_path.exists():
-                existing = pl.read_parquet(temp_profile_path)
-                combined = pl.concat([existing, stats_df])
+                existing = pl.read_parquet(temp_profile_path, memory_map=False)
+                combined = pl.concat([existing, stats_df]).rechunk()
                 del existing
                 combined.write_parquet(temp_profile_path)
                 del combined
@@ -243,7 +246,8 @@ def profile_large_file(
     profile_result = {"columns": {}, "total_rows": total_rows, "file_size": file_path.stat().st_size}
 
     if temp_profile_path.exists():
-        raw = pl.read_parquet(temp_profile_path)
+        # memory_map=False so the subsequent unlink() works on Windows.
+        raw = pl.read_parquet(temp_profile_path, memory_map=False)
 
         # Aggregate numeric columns
         for col in numeric_cols:
@@ -351,6 +355,62 @@ def read_cached_profile(profile_path: Path) -> dict:
     return {"columns": columns, "total_rows": total_rows, "file_size": file_size}
 
 
+def apply_column_exclusions(
+    lf: pl.LazyFrame,
+    column: str,
+    exclude,
+    schema=None,
+) -> pl.LazyFrame:
+    """Apply per-column value exclusions to a lazy frame.
+
+    `exclude` is a list of tokens. Supported tokens:
+      - "null"  — drop rows where the column is null
+      - "zero"  — drop rows where the numeric value equals 0
+      - "nan"   — drop rows where the float value is NaN
+      - "blank" — drop rows where the string value is empty/whitespace
+
+    Tokens are silently skipped when the column's dtype makes them meaningless
+    (e.g. "zero" on a string column, "nan" on an integer column).
+    """
+    if not exclude:
+        return lf
+
+    tokens = set(exclude) if isinstance(exclude, (list, tuple, set)) else set()
+    if not tokens:
+        return lf
+
+    dtype = None
+    if schema is not None:
+        try:
+            dtype = schema.get(column) if hasattr(schema, "get") else schema[column]
+        except Exception:
+            dtype = None
+
+    is_numeric = dtype is not None and hasattr(dtype, "is_numeric") and dtype.is_numeric()
+    is_float = dtype in (pl.Float32, pl.Float64)
+    is_string_like = dtype is None or (not is_numeric)
+
+    if "null" in tokens:
+        lf = lf.filter(pl.col(column).is_not_null())
+    if "zero" in tokens and (is_numeric or dtype is None):
+        try:
+            lf = lf.filter(pl.col(column).cast(pl.Float64, strict=False) != 0)
+        except Exception:
+            pass
+    if "nan" in tokens and is_float:
+        try:
+            lf = lf.filter(~pl.col(column).is_nan())
+        except Exception:
+            pass
+    if "blank" in tokens and is_string_like:
+        try:
+            lf = lf.filter(pl.col(column).cast(pl.Utf8).str.strip_chars() != "")
+        except Exception:
+            pass
+
+    return lf
+
+
 def estimate_filtered_rows(
     file_path: Path,
     file_type: str,
@@ -361,22 +421,30 @@ def estimate_filtered_rows(
     on Parquet (reads only row-group metadata that matches), so it's fast even
     on huge files."""
     lf = _get_lazy_frame(file_path, file_type, separator)
+    schema = lf.collect_schema()
 
     for col_name, filter_val in filters.items():
         if isinstance(filter_val, dict):
-            # Numeric range filter
-            if filter_val.get("min") not in (None, "", "null"):
-                try:
-                    lf = lf.filter(pl.col(col_name).cast(pl.Float64, strict=False) >= float(filter_val["min"]))
-                except (ValueError, TypeError):
-                    pass
-            if filter_val.get("max") not in (None, "", "null"):
-                try:
-                    lf = lf.filter(pl.col(col_name).cast(pl.Float64, strict=False) <= float(filter_val["max"]))
-                except (ValueError, TypeError):
-                    pass
+            if "values" in filter_val:
+                vals = filter_val.get("values") or []
+                if vals:
+                    str_vals = [str(v) for v in vals]
+                    lf = lf.filter(pl.col(col_name).cast(pl.Utf8).is_in(str_vals))
+            else:
+                # Numeric range filter
+                if filter_val.get("min") not in (None, "", "null"):
+                    try:
+                        lf = lf.filter(pl.col(col_name).cast(pl.Float64, strict=False) >= float(filter_val["min"]))
+                    except (ValueError, TypeError):
+                        pass
+                if filter_val.get("max") not in (None, "", "null"):
+                    try:
+                        lf = lf.filter(pl.col(col_name).cast(pl.Float64, strict=False) <= float(filter_val["max"]))
+                    except (ValueError, TypeError):
+                        pass
+            lf = apply_column_exclusions(lf, col_name, filter_val.get("exclude") or [], schema)
         elif isinstance(filter_val, list) and len(filter_val) > 0:
-            # Categorical filter
+            # Legacy categorical filter (plain list of values)
             str_vals = [str(v) for v in filter_val]
             lf = lf.filter(pl.col(col_name).cast(pl.Utf8).is_in(str_vals))
 

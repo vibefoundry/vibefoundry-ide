@@ -67,6 +67,7 @@ from vibefoundry.watcher import FileWatcher
 from vibefoundry.profiler import (
     is_file_massive, get_profile_cache_path, is_profile_valid,
     profile_large_file, read_cached_profile, estimate_filtered_rows,
+    apply_column_exclusions,
     _detect_csv_separator, _get_lazy_frame,
 )
 
@@ -125,24 +126,37 @@ class DataFrameState:
 
     def _apply_filters_sort(self, lf: pl.LazyFrame) -> pl.LazyFrame:
         """Apply current filters and sort to a lazy frame"""
+        try:
+            schema = lf.collect_schema()
+        except Exception:
+            schema = None
+
         # Apply filters
         for column, filter_val in self.current_filters.items():
             if column not in self.columns:
                 continue
             if isinstance(filter_val, dict):
-                # Numeric range filter
-                if filter_val.get('min') not in (None, '', 'null'):
-                    try:
-                        min_val = float(filter_val['min'])
-                        lf = lf.filter(pl.col(column).cast(pl.Float64, strict=False) >= min_val)
-                    except (ValueError, TypeError):
-                        pass
-                if filter_val.get('max') not in (None, '', 'null'):
-                    try:
-                        max_val = float(filter_val['max'])
-                        lf = lf.filter(pl.col(column).cast(pl.Float64, strict=False) <= max_val)
-                    except (ValueError, TypeError):
-                        pass
+                if 'values' in filter_val:
+                    # Categorical filter (object form with optional exclude)
+                    vals = filter_val.get('values') or []
+                    if vals:
+                        str_vals = [str(v) for v in vals]
+                        lf = lf.filter(pl.col(column).cast(pl.Utf8).is_in(str_vals))
+                else:
+                    # Numeric range filter
+                    if filter_val.get('min') not in (None, '', 'null'):
+                        try:
+                            min_val = float(filter_val['min'])
+                            lf = lf.filter(pl.col(column).cast(pl.Float64, strict=False) >= min_val)
+                        except (ValueError, TypeError):
+                            pass
+                    if filter_val.get('max') not in (None, '', 'null'):
+                        try:
+                            max_val = float(filter_val['max'])
+                            lf = lf.filter(pl.col(column).cast(pl.Float64, strict=False) <= max_val)
+                        except (ValueError, TypeError):
+                            pass
+                lf = apply_column_exclusions(lf, column, filter_val.get('exclude') or [], schema)
             elif isinstance(filter_val, list) and len(filter_val) > 0:
                 # Categorical filter with special sentinels for null/blank/zero
                 SPECIAL = {'__vf_filter_null__', '__vf_filter_blank__', '__vf_filter_zero__'}
@@ -896,7 +910,7 @@ def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_
     if deleted_files is None:
         deleted_files = []
 
-    rel_path = str(path.relative_to(base_path))
+    rel_path = path.relative_to(base_path).as_posix()
     is_file = path.is_file()
     node = {
         "name": path.name,
@@ -1254,11 +1268,9 @@ async def read_file(path: str, sheet: Optional[str] = None):
         image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.webp'}
         if ext in image_extensions:
             return {"type": "image", "path": path, "filename": file_path.name, "extension": ext}
-        # PDF files - return as base64 with pdf type
+        # PDF files - metadata only, frontend uses /api/pdf endpoint for direct streaming
         if ext == '.pdf':
-            import base64
-            content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
-            return {"type": "pdf", "content": content, "encoding": "base64", "filename": file_path.name}
+            return {"type": "pdf", "path": path, "filename": file_path.name}
         # Other binary files - still use base64
         import base64
         content = base64.b64encode(file_path.read_bytes()).decode('utf-8')
@@ -1347,6 +1359,29 @@ async def get_image(path: str):
 
     media_type = media_types.get(ext, 'application/octet-stream')
     return FileResponse(file_path, media_type=media_type)
+
+
+@app.get("/api/pdf")
+async def get_pdf(path: str):
+    """Serve PDF files directly with application/pdf media type for inline iframe rendering."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / path
+
+    try:
+        file_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not file_path.exists() or file_path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    return FileResponse(
+        file_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{file_path.name}"'},
+    )
 
 
 class WriteFileRequest(BaseModel):

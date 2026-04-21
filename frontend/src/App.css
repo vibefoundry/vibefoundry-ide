@@ -289,6 +289,16 @@ body {
   z-index: 10;
 }
 
+/* Full-viewport overlay during any drag-resize.
+   Blocks child iframes / Monaco / xterm from swallowing mousemove/mouseup,
+   so the document-level listeners keep firing smoothly. */
+.resize-capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: transparent;
+}
+
 .resize-handle:hover,
 .app.resizing .resize-handle {
   background-color: var(--color-accent);
@@ -1422,6 +1432,18 @@ body {
   object-fit: contain;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.pdf-viewer {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pdf-viewer iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
 /* Unknown file type */
@@ -3895,6 +3917,33 @@ body {
   font-size: 12px;
   color: var(--color-text-muted);
   flex-shrink: 0;
+}
+
+.lfp-exclude-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 6px;
+  padding-left: 2px;
+}
+
+.lfp-exclude-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.lfp-exclude-item input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.lfp-exclude-item:hover {
+  color: var(--color-text);
 }
 
 /* Categorical dropdown */

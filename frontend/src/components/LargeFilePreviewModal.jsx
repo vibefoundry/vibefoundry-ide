@@ -107,7 +107,11 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
     if (estimateTimerRef.current) clearTimeout(estimateTimerRef.current)
     const hasFilters = Object.values(filters).some(v => {
       if (Array.isArray(v)) return v.length > 0
-      if (typeof v === 'object' && v !== null) return v.min != null || v.max != null
+      if (typeof v === 'object' && v !== null) {
+        if ((v.exclude || []).length > 0) return true
+        if (v.min != null || v.max != null) return true
+        if ((v.values || []).length > 0) return true
+      }
       return false
     })
     if (!hasFilters) {
@@ -134,13 +138,36 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
     if (stage === 'filtering' && profile) requestEstimate()
   }, [filters, stage, profile, requestEstimate])
 
+  // Read a column's selected categorical values regardless of legacy-list or object form.
+  const getSelectedValues = (colName) => {
+    const f = filters[colName]
+    if (Array.isArray(f)) return f
+    if (f && typeof f === 'object') return f.values || []
+    return []
+  }
+
+  // Read a column's exclusion tokens (e.g. ['null','zero']).
+  const getExclude = (colName) => {
+    const f = filters[colName]
+    if (!f || Array.isArray(f)) return []
+    return f.exclude || []
+  }
+
   const handleCategoricalToggle = (colName, value) => {
     setFilters(prev => {
-      const current = prev[colName] || []
-      const next = current.includes(value)
-        ? current.filter(v => v !== value)
-        : [...current, value]
-      return { ...prev, [colName]: next }
+      const current = prev[colName]
+      const currentValues = Array.isArray(current)
+        ? current
+        : (current?.values || [])
+      const currentExclude = Array.isArray(current) ? [] : (current?.exclude || [])
+      const nextValues = currentValues.includes(value)
+        ? currentValues.filter(v => v !== value)
+        : [...currentValues, value]
+      // Keep legacy list form when no exclusions are set.
+      if (currentExclude.length === 0) {
+        return { ...prev, [colName]: nextValues }
+      }
+      return { ...prev, [colName]: { values: nextValues, exclude: currentExclude } }
     })
   }
 
@@ -148,6 +175,39 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
     setFilters(prev => {
       const current = prev[colName] || {}
       return { ...prev, [colName]: { ...current, [field]: value === '' ? null : value } }
+    })
+  }
+
+  const handleExcludeToggle = (colName, kind, isCategorical) => {
+    setFilters(prev => {
+      const current = prev[colName]
+      let values, exclude, min, max
+      if (Array.isArray(current)) {
+        values = current
+        exclude = []
+      } else if (current && typeof current === 'object') {
+        values = current.values
+        exclude = current.exclude || []
+        min = current.min
+        max = current.max
+      } else {
+        exclude = []
+      }
+      const nextExclude = exclude.includes(kind)
+        ? exclude.filter(k => k !== kind)
+        : [...exclude, kind]
+      if (isCategorical) {
+        const nextValues = values || []
+        if (nextExclude.length === 0 && nextValues.length === 0) {
+          // Revert to legacy list form when nothing is set.
+          return { ...prev, [colName]: [] }
+        }
+        return { ...prev, [colName]: { values: nextValues, exclude: nextExclude } }
+      }
+      return {
+        ...prev,
+        [colName]: { min: min ?? null, max: max ?? null, exclude: nextExclude },
+      }
     })
   }
 
@@ -173,7 +233,7 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
   const progressPct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
 
   const renderCategoricalDropdown = (colName, info) => {
-    const selected = filters[colName] || []
+    const selected = getSelectedValues(colName)
     const isOpen = openDropdown === colName
     const allValues = info.values || []
     const filtered = dropdownSearch && isOpen
@@ -243,7 +303,17 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
             {selected.length > 0 && (
               <button
                 className="lfp-clear-filter"
-                onClick={() => setFilters(prev => ({ ...prev, [colName]: [] }))}
+                onClick={() => setFilters(prev => {
+                  const current = prev[colName]
+                  if (!current || Array.isArray(current)) {
+                    return { ...prev, [colName]: [] }
+                  }
+                  const exclude = current.exclude || []
+                  if (exclude.length === 0) {
+                    return { ...prev, [colName]: [] }
+                  }
+                  return { ...prev, [colName]: { values: [], exclude } }
+                })}
               >
                 Clear selection
               </button>
@@ -342,20 +412,71 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
                         <input
                           type="number"
                           placeholder={`Min (${info.min ?? ''})`}
-                          value={filters[colName]?.min ?? ''}
+                          value={Array.isArray(filters[colName]) ? '' : (filters[colName]?.min ?? '')}
                           onChange={e => handleNumericChange(colName, 'min', e.target.value)}
                         />
                         <span className="lfp-range-sep">to</span>
                         <input
                           type="number"
                           placeholder={`Max (${info.max ?? ''})`}
-                          value={filters[colName]?.max ?? ''}
+                          value={Array.isArray(filters[colName]) ? '' : (filters[colName]?.max ?? '')}
                           onChange={e => handleNumericChange(colName, 'max', e.target.value)}
                         />
                       </div>
                     )}
 
                     {info.type === 'categorical' && renderCategoricalDropdown(colName, info)}
+
+                    <div className="lfp-exclude-row">
+                      {info.type === 'numeric' && (
+                        <>
+                          <label className="lfp-exclude-item">
+                            <input
+                              type="checkbox"
+                              checked={getExclude(colName).includes('null')}
+                              onChange={() => handleExcludeToggle(colName, 'null', false)}
+                            />
+                            <span>No nulls</span>
+                          </label>
+                          <label className="lfp-exclude-item">
+                            <input
+                              type="checkbox"
+                              checked={getExclude(colName).includes('zero')}
+                              onChange={() => handleExcludeToggle(colName, 'zero', false)}
+                            />
+                            <span>No 0s</span>
+                          </label>
+                          <label className="lfp-exclude-item">
+                            <input
+                              type="checkbox"
+                              checked={getExclude(colName).includes('nan')}
+                              onChange={() => handleExcludeToggle(colName, 'nan', false)}
+                            />
+                            <span>No NaN</span>
+                          </label>
+                        </>
+                      )}
+                      {info.type === 'categorical' && (
+                        <>
+                          <label className="lfp-exclude-item">
+                            <input
+                              type="checkbox"
+                              checked={getExclude(colName).includes('null')}
+                              onChange={() => handleExcludeToggle(colName, 'null', true)}
+                            />
+                            <span>No nulls</span>
+                          </label>
+                          <label className="lfp-exclude-item">
+                            <input
+                              type="checkbox"
+                              checked={getExclude(colName).includes('blank')}
+                              onChange={() => handleExcludeToggle(colName, 'blank', true)}
+                            />
+                            <span>No blanks</span>
+                          </label>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

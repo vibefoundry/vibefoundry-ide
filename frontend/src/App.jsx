@@ -604,6 +604,12 @@ function App() {
             data: data.data,
             filename: data.filename
           })
+        } else if (data.type === 'pdf') {
+          setFileContent({
+            type: 'pdf',
+            path: data.path,
+            filename: data.filename
+          })
         } else {
           const fileType = getFileType(file.name)
           const extension = getExtension(file.name)
@@ -904,6 +910,12 @@ function App() {
               filename: data.filename,
               extension: data.extension
             })
+          } else if (data.type === 'pdf') {
+            setFileContent({
+              type: 'pdf',
+              path: data.path,
+              filename: data.filename
+            })
           } else {
             const fileType = getFileType(selectedFile.name)
             const extension = getExtension(selectedFile.name)
@@ -933,8 +945,19 @@ function App() {
     )
   }
 
+  const activeResizeCursor = isResizing || isResizingTerminal
+    ? 'col-resize'
+    : isResizingScriptRunner
+      ? 'ns-resize'
+      : isResizingTerminalModal
+        ? 'se-resize'
+        : null
+
   return (
     <div className={`app ${isResizing ? 'resizing' : ''}`}>
+      {activeResizeCursor && (
+        <div className="resize-capture-overlay" style={{ cursor: activeResizeCursor }} />
+      )}
       {/* Unified Top Bar */}
       {canWrite && tree.length > 0 && (
         <div className="top-bar">

@@ -4,6 +4,15 @@ import JsonViewer from './JsonViewer'
 import CodeViewer from './CodeViewer'
 import MarkdownViewer from './MarkdownViewer'
 
+const PdfViewer = ({ content }) => (
+  <div className="pdf-viewer">
+    <iframe
+      src={`/api/pdf?path=${encodeURIComponent(content.path)}`}
+      title={content.filename}
+    />
+  </div>
+)
+
 const DocxViewer = ({ content }) => {
   return (
     <div className="docx-viewer">
@@ -63,6 +72,8 @@ const FileViewer = ({ content, canWrite, onSave, onSheetChange, saveStatus, onLa
             />
           </div>
         )
+      case 'pdf':
+        return <PdfViewer content={content} />
       case 'json':
         return <JsonViewer content={content} />
       case 'code':
