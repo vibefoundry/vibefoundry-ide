@@ -38,6 +38,7 @@ Thumbs.db
 
 # Secrets
 .pypi_token
+.env
 
 # Build artifacts
 frontend/dist/

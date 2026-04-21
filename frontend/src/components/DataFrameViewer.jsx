@@ -5,17 +5,18 @@ import { List } from 'react-window'
 const ROW_HEIGHT = 32
 const CHUNK_SIZE = 1000
 const DEFAULT_COL_WIDTH = 120
-const ROW_NUM_WIDTH = 50
+const DEFAULT_ROW_NUM_WIDTH = 50
+const MIN_ROW_NUM_WIDTH = 30
 const MAX_AUTO_LOAD = 1000  // Only auto-load up to this many rows
 
 // Memoized row component for react-window
-const VirtualRow = memo(({ index, style, rows, columns, columnWidths, getColWidth, isCellSelected, handleCellMouseDown, handleCellMouseEnter }) => {
+const VirtualRow = memo(({ index, style, rows, columns, columnWidths, getColWidth, isCellSelected, handleCellMouseDown, handleCellMouseEnter, rowNumWidth }) => {
   const row = rows[index]
   if (!row) return <div style={style} />
 
   return (
     <div style={{ ...style, display: 'flex' }} className="df-row">
-      <div className="df-cell df-row-num" style={{ width: ROW_NUM_WIDTH, minWidth: ROW_NUM_WIDTH }}>
+      <div className="df-cell df-row-num" style={{ width: rowNumWidth, minWidth: rowNumWidth, left: 0 }}>
         {index + 1}
       </div>
       {columns.map((col, colIdx) => {
@@ -57,6 +58,7 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
   const [selection, setSelection] = useState(null)
   const [isSelecting, setIsSelecting] = useState(false)
   const [columnWidths, setColumnWidths] = useState({})
+  const [rowNumWidth, setRowNumWidth] = useState(DEFAULT_ROW_NUM_WIDTH)
 
   // Refs
   const dropdownRef = useRef(null)
@@ -80,8 +82,9 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
     setSortConfig({ column: null, direction: 'asc' })
     setSelection(null)
     setColumnWidths({})
+    setRowNumWidth(DEFAULT_ROW_NUM_WIDTH)
     setColumnInfo(content.columnInfo || {})
-  }, [content.filename])
+  }, [content.filePath, content.filename])
 
   // Measure container height for virtual list
   useEffect(() => {
@@ -338,6 +341,27 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
     document.addEventListener('mouseup', handleMouseUp)
   }
 
+  const handleRowNumResizeStart = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const startX = e.clientX
+    const startWidth = rowNumWidth
+
+    const handleMouseMove = (e) => {
+      const diff = e.clientX - startX
+      setRowNumWidth(Math.max(MIN_ROW_NUM_WIDTH, startWidth + diff))
+    }
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
+
   // Filter functions
   const toggleFilter = (col, e) => {
     e.stopPropagation()
@@ -433,10 +457,10 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
   const activeFilterCount = Object.keys(filters).filter(isFiltered).length
 
   const formatNumber = (num) => {
-    if (num === undefined || num === null) return '-'
-    if (Math.abs(num) >= 1000000) return (num / 1000000).toFixed(2) + 'M'
-    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(2) + 'K'
-    return Number.isInteger(num) ? num.toString() : num.toFixed(2)
+    if (num === undefined || num === null) return ''
+    if (typeof num !== 'number' || isNaN(num)) return ''
+    if (Number.isInteger(num)) return num.toLocaleString()
+    return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
   }
 
   // Get column width
@@ -444,7 +468,7 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
 
   // Calculate total width for horizontal scrolling
   const getTotalWidth = () => {
-    let total = ROW_NUM_WIDTH
+    let total = rowNumWidth
     for (const col of columns) {
       total += getColWidth(col)
     }
@@ -480,13 +504,18 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
       <div className="dataframe-header-container" ref={headerRef}>
         {/* Summary stats - 4 green rows above column headers */}
         {[
-          { key: 'count', label: 'Count', get: (info) => info ? info.count?.toLocaleString() : '' },
+          { key: 'count', label: 'Count', get: (info) => info ? formatNumber(info.count) : '' },
           { key: 'sum', label: 'Sum', get: (info) => info?.type === 'numeric' ? formatNumber(info.sum) : '' },
           { key: 'mean', label: 'Mean', get: (info) => info?.type === 'numeric' ? formatNumber(info.mean) : '' },
           { key: 'median', label: 'Median', get: (info) => info?.type === 'numeric' ? formatNumber(info.median) : '' },
+          { key: 'unique', label: 'Unique', get: (info) => formatNumber(info?.uniqueCount) },
+          { key: 'null', label: 'Null', get: (info) => formatNumber(info?.nullCount) },
+          { key: 'nan', label: 'NaN', get: (info) => info?.type === 'numeric' ? formatNumber(info.nanCount) : '' },
+          { key: 'blank', label: 'Blank', get: (info) => info?.type === 'categorical' ? formatNumber(info.blankCount) : '' },
+          { key: 'zero', label: '0', get: (info) => info?.type === 'numeric' ? formatNumber(info.zeroCount) : '' },
         ].map(stat => (
           <div key={stat.key} className="df-stat-row" style={{ width: getTotalWidth() }}>
-            <div className="df-stat-cell df-stat-label" style={{ width: ROW_NUM_WIDTH, minWidth: ROW_NUM_WIDTH }}>
+            <div className="df-stat-cell df-stat-label" style={{ width: rowNumWidth, minWidth: rowNumWidth, left: 0 }}>
               {stat.label}
             </div>
             {columns.map(col => {
@@ -502,8 +531,12 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
         ))}
         {/* Column names row */}
         <div className="df-header-row" style={{ width: getTotalWidth() }}>
-          <div className="df-header-cell df-row-num" style={{ width: ROW_NUM_WIDTH, minWidth: ROW_NUM_WIDTH }}>
+          <div className="df-header-cell df-row-num" style={{ width: rowNumWidth, minWidth: rowNumWidth, left: 0 }}>
             #
+            <div
+              className="resize-handle"
+              onMouseDown={handleRowNumResizeStart}
+            />
           </div>
           {columns.map((col) => {
             const filtered = isFiltered(col)
@@ -564,7 +597,8 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
               getColWidth,
               isCellSelected,
               handleCellMouseDown,
-              handleCellMouseEnter
+              handleCellMouseEnter,
+              rowNumWidth
             }}
           />
         </div>
@@ -603,6 +637,40 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
           style={{ left: dropdownPosition.x, top: dropdownPosition.y }}
           onClick={e => e.stopPropagation()}
         >
+          <div className="sort-actions">
+            <button
+              className={`sort-btn ${sortConfig.column === activeFilter && sortConfig.direction === 'asc' ? 'active' : ''}`}
+              onClick={async () => {
+                const newSort = { column: activeFilter, direction: 'asc' }
+                setSortConfig(newSort)
+                await applyFilterSort(filters, newSort)
+              }}
+            >
+              {columnInfo[activeFilter]?.type === 'numeric' ? '↑ Smallest to Largest' : '↑ A to Z'}
+            </button>
+            <button
+              className={`sort-btn ${sortConfig.column === activeFilter && sortConfig.direction === 'desc' ? 'active' : ''}`}
+              onClick={async () => {
+                const newSort = { column: activeFilter, direction: 'desc' }
+                setSortConfig(newSort)
+                await applyFilterSort(filters, newSort)
+              }}
+            >
+              {columnInfo[activeFilter]?.type === 'numeric' ? '↓ Largest to Smallest' : '↓ Z to A'}
+            </button>
+            {sortConfig.column === activeFilter && (
+              <button
+                className="sort-btn sort-clear"
+                onClick={async () => {
+                  const newSort = { column: null, direction: 'asc' }
+                  setSortConfig(newSort)
+                  await applyFilterSort(filters, newSort)
+                }}
+              >
+                Clear Sort
+              </button>
+            )}
+          </div>
           {columnInfo[activeFilter]?.type === 'numeric' ? (
             <div className="numeric-filter">
               <div className="filter-row">
@@ -638,6 +706,20 @@ const DataFrameViewer = ({ content, onSheetChange }) => {
                 <button onClick={clearAll}>Clear All</button>
               </div>
               <div className="filter-values">
+                {[
+                  { token: '__vf_filter_null__', label: '(Null)' },
+                  { token: '__vf_filter_blank__', label: '(Blank)' },
+                  { token: '__vf_filter_zero__', label: '(0)' },
+                ].map(special => (
+                  <label key={special.token} className="filter-checkbox filter-checkbox-special">
+                    <input
+                      type="checkbox"
+                      checked={Array.isArray(tempFilter) && tempFilter.includes(special.token)}
+                      onChange={() => toggleValue(special.token)}
+                    />
+                    <span><em>{special.label}</em></span>
+                  </label>
+                ))}
                 {columnInfo[activeFilter]?.values
                   ?.filter(v => filterSearch === '' || String(v).toLowerCase().includes(filterSearch.toLowerCase()))
                   .map((val, idx) => (

@@ -5,11 +5,38 @@ FastAPI backend server for VibeFoundry IDE
 import os
 import sys
 import json
+import math
 import asyncio
 import struct
 import signal
 import time
 from pathlib import Path
+
+
+def _safe_float_or_none(v):
+    """Coerce to JSON-safe float or None. NaN/Inf/None all become None (shown blank in UI)."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
+def _safe_int(v):
+    """Coerce to int. None/NaN become 0. Use for count-style stats that are always integers ≥ 0."""
+    if v is None:
+        return 0
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0
+    if math.isnan(f) or math.isinf(f):
+        return 0
+    return int(f)
 
 # Unix-only imports for terminal functionality
 if sys.platform != 'win32':
@@ -117,9 +144,25 @@ class DataFrameState:
                     except (ValueError, TypeError):
                         pass
             elif isinstance(filter_val, list) and len(filter_val) > 0:
-                # Categorical filter
-                str_vals = [str(v) for v in filter_val]
-                lf = lf.filter(pl.col(column).cast(pl.Utf8).is_in(str_vals))
+                # Categorical filter with special sentinels for null/blank/zero
+                SPECIAL = {'__vf_filter_null__', '__vf_filter_blank__', '__vf_filter_zero__'}
+                specials = [v for v in filter_val if v in SPECIAL]
+                regular = [v for v in filter_val if v not in SPECIAL]
+                predicates = []
+                if regular:
+                    str_vals = [str(v) for v in regular]
+                    predicates.append(pl.col(column).cast(pl.Utf8).is_in(str_vals))
+                if '__vf_filter_null__' in specials:
+                    predicates.append(pl.col(column).is_null())
+                if '__vf_filter_blank__' in specials:
+                    predicates.append(pl.col(column).cast(pl.Utf8) == '')
+                if '__vf_filter_zero__' in specials:
+                    predicates.append(pl.col(column).cast(pl.Float64, strict=False) == 0)
+                if predicates:
+                    combined = predicates[0]
+                    for p in predicates[1:]:
+                        combined = combined | p
+                    lf = lf.filter(combined)
 
         # Apply sort
         if self.current_sort and self.current_sort.get('column'):
@@ -150,11 +193,17 @@ class DataFrameState:
         rows_df = lf.slice(offset, limit).collect()
         rows = rows_df.to_dicts()
 
-        # Replace None with empty string
+        # Null → blank, NaN → "NaN" (visible), Inf → blank (for JSON safety)
         for row in rows:
             for key in row:
-                if row[key] is None:
+                v = row[key]
+                if v is None:
                     row[key] = ''
+                elif isinstance(v, float):
+                    if math.isnan(v):
+                        row[key] = 'NaN'
+                    elif math.isinf(v):
+                        row[key] = ''
 
         return rows, self._filtered_row_count
 
@@ -191,35 +240,43 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
     # Batch all numeric column stats in ONE query (single file scan)
     if numeric_cols:
         try:
+            float_cols = {c for c in numeric_cols if schema.get(c) in (pl.Float32, pl.Float64)}
             exprs = []
             for col in numeric_cols:
+                # fill_nan(None) so NaN is ignored in aggregations (treated as missing)
+                clean = pl.col(col).fill_nan(None) if col in float_cols else pl.col(col)
                 exprs.extend([
-                    pl.col(col).min().alias(f'{col}__min'),
-                    pl.col(col).max().alias(f'{col}__max'),
-                    pl.col(col).sum().alias(f'{col}__sum'),
-                    pl.col(col).mean().alias(f'{col}__mean'),
-                    pl.col(col).median().alias(f'{col}__median'),
+                    clean.min().alias(f'{col}__min'),
+                    clean.max().alias(f'{col}__max'),
+                    clean.sum().alias(f'{col}__sum'),
+                    clean.mean().alias(f'{col}__mean'),
+                    clean.median().alias(f'{col}__median'),
                     pl.col(col).count().alias(f'{col}__count'),
                     pl.col(col).is_null().sum().alias(f'{col}__null'),
                     (pl.col(col) == 0).sum().alias(f'{col}__zero'),
+                    pl.col(col).drop_nulls().n_unique().alias(f'{col}__unique'),
                 ])
+                if col in float_cols:
+                    exprs.append(pl.col(col).is_nan().sum().alias(f'{col}__nan'))
             stats = lf.select(exprs).collect()
 
             for col in numeric_cols:
                 column_info[col] = {
                     "type": "numeric",
-                    "min": float(stats[f'{col}__min'][0]) if stats[f'{col}__min'][0] is not None else 0,
-                    "max": float(stats[f'{col}__max'][0]) if stats[f'{col}__max'][0] is not None else 0,
-                    "sum": float(stats[f'{col}__sum'][0]) if stats[f'{col}__sum'][0] is not None else 0,
-                    "mean": float(stats[f'{col}__mean'][0]) if stats[f'{col}__mean'][0] is not None else 0,
-                    "median": float(stats[f'{col}__median'][0]) if stats[f'{col}__median'][0] is not None else 0,
-                    "count": int(stats[f'{col}__count'][0]) if stats[f'{col}__count'][0] is not None else 0,
-                    "nullCount": int(stats[f'{col}__null'][0]) if stats[f'{col}__null'][0] is not None else 0,
-                    "zeroCount": int(stats[f'{col}__zero'][0]) if stats[f'{col}__zero'][0] is not None else 0,
+                    "min": _safe_float_or_none(stats[f'{col}__min'][0]),
+                    "max": _safe_float_or_none(stats[f'{col}__max'][0]),
+                    "sum": _safe_float_or_none(stats[f'{col}__sum'][0]),
+                    "mean": _safe_float_or_none(stats[f'{col}__mean'][0]),
+                    "median": _safe_float_or_none(stats[f'{col}__median'][0]),
+                    "count": _safe_int(stats[f'{col}__count'][0]),
+                    "nullCount": _safe_int(stats[f'{col}__null'][0]),
+                    "zeroCount": _safe_int(stats[f'{col}__zero'][0]),
+                    "uniqueCount": _safe_int(stats[f'{col}__unique'][0]),
+                    "nanCount": _safe_int(stats[f'{col}__nan'][0]) if col in float_cols else 0,
                 }
         except Exception:
             for col in numeric_cols:
-                column_info[col] = {"type": "numeric", "min": 0, "max": 0, "sum": 0, "mean": 0, "median": 0, "count": 0, "nullCount": 0, "zeroCount": 0}
+                column_info[col] = {"type": "numeric", "min": None, "max": None, "sum": None, "mean": None, "median": None, "count": 0, "nullCount": 0, "zeroCount": 0, "uniqueCount": 0, "nanCount": 0}
 
     # Batch categorical stats in ONE query
     if categorical_cols:
@@ -230,6 +287,7 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
                     pl.col(col).count().alias(f'{col}__count'),
                     pl.col(col).is_null().sum().alias(f'{col}__null'),
                     (pl.col(col).cast(pl.Utf8) == '').sum().alias(f'{col}__blank'),
+                    pl.col(col).drop_nulls().n_unique().alias(f'{col}__unique'),
                 ])
             stats = lf.select(exprs).collect()
 
@@ -246,13 +304,14 @@ def _compute_column_info(lf: pl.LazyFrame, columns: list, schema) -> dict:
                 column_info[col] = {
                     "type": "categorical",
                     "values": unique_vals,
-                    "count": int(stats[f'{col}__count'][0]) if stats[f'{col}__count'][0] is not None else 0,
-                    "nullCount": int(stats[f'{col}__null'][0]) if stats[f'{col}__null'][0] is not None else 0,
-                    "blankCount": int(stats[f'{col}__blank'][0]) if stats[f'{col}__blank'][0] is not None else 0,
+                    "count": _safe_int(stats[f'{col}__count'][0]),
+                    "nullCount": _safe_int(stats[f'{col}__null'][0]),
+                    "blankCount": _safe_int(stats[f'{col}__blank'][0]),
+                    "uniqueCount": _safe_int(stats[f'{col}__unique'][0]),
                 }
         except Exception:
             for col in categorical_cols:
-                column_info[col] = {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0}
+                column_info[col] = {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0, "uniqueCount": 0}
 
     return column_info
 
@@ -1016,7 +1075,7 @@ async def read_file(path: str, sheet: Optional[str] = None):
 
                     # Store CSV file info for streaming
                     df_state.clear()
-                    df_state.file_path = str(actual_file_path)
+                    df_state.file_path = Path(actual_file_path).as_posix()
                     df_state.csv_separator = separator
                     df_state.file_type = 'csv'
 
@@ -1039,7 +1098,7 @@ async def read_file(path: str, sheet: Optional[str] = None):
             elif ext in {'.parquet', '.geoparquet'}:
                 try:
                     df_state.clear()
-                    df_state.file_path = str(file_path)
+                    df_state.file_path = file_path.as_posix()
                     df_state.file_type = 'parquet'
                     df_state.csv_separator = ','
 
@@ -1127,7 +1186,7 @@ async def read_file(path: str, sheet: Optional[str] = None):
                 try:
                     from openpyxl import load_workbook
                     df_state.clear()
-                    df_state.file_path = str(file_path)
+                    df_state.file_path = file_path.as_posix()
                     df_state.file_type = 'excel'
                     df_state.csv_separator = ','
 
@@ -1152,7 +1211,7 @@ async def read_file(path: str, sheet: Optional[str] = None):
             try:
                 column_info = _compute_full_column_info(lf, df_state.columns, schema)
             except Exception:
-                column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0} for col in df_state.columns}
+                column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0, "uniqueCount": 0} for col in df_state.columns}
 
             df_state.column_info = column_info
 
@@ -1317,7 +1376,6 @@ async def write_file(request: WriteFileRequest):
     return {"success": True, "path": request.path}
 
 
-CSV_TO_PARQUET_THRESHOLD = 50 * 1024 * 1024  # 50MB
 UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
 
 
@@ -1326,8 +1384,7 @@ async def upload_file(
     file: UploadFile = File(...),
     folder: str = Form(...)
 ):
-    """Upload a binary file to a folder, streaming to disk in chunks.
-    Large CSVs (>50MB) are auto-converted to Parquet."""
+    """Upload a binary file to a folder, streaming to disk in chunks."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
@@ -1345,46 +1402,74 @@ async def upload_file(
     target_folder.mkdir(parents=True, exist_ok=True)
 
     # Stream file to disk in chunks to avoid loading entire file into memory
-    bytes_written = 0
     with open(target_path, "wb") as f:
         while True:
             chunk = await file.read(UPLOAD_CHUNK_SIZE)
             if not chunk:
                 break
             f.write(chunk)
-            bytes_written += len(chunk)
 
-    # Auto-convert large CSVs to Parquet
-    final_path = target_path
-    converted = False
-    if target_path.suffix.lower() == ".csv" and bytes_written > CSV_TO_PARQUET_THRESHOLD:
-        parquet_path = target_path.with_suffix(".parquet")
-        # Check if the watcher already converted this file (race condition)
-        if parquet_path.exists() and not target_path.exists():
-            print(f"[Upload] Watcher already converted CSV to Parquet: {parquet_path.name}")
-            final_path = parquet_path
-            converted = True
-        elif target_path.exists():
-            try:
-                print(f"[Upload] Converting large CSV to Parquet: {target_path.name} ({bytes_written / 1024 / 1024:.1f} MB)")
-                pl.scan_csv(str(target_path), infer_schema_length=10000, null_values=["null", "NULL", "None", ""]).sink_parquet(str(parquet_path))
-                target_path.unlink()  # Delete original CSV
-                final_path = parquet_path
-                converted = True
-                print(f"[Upload] Conversion complete: {parquet_path.name}")
-            except Exception as e:
-                # Check again if watcher converted while we were trying
-                if parquet_path.exists() and not target_path.exists():
-                    print(f"[Upload] Watcher converted during our attempt: {parquet_path.name}")
-                    final_path = parquet_path
-                    converted = True
-                else:
-                    print(f"[Upload] Parquet conversion failed, keeping CSV: {e}")
-                    if parquet_path.exists():
-                        parquet_path.unlink()
+    result_path = f"{folder}/{target_path.name}"
+    return {"success": True, "path": result_path, "converted": False}
 
-    result_path = f"{folder}/{final_path.name}"
-    return {"success": True, "path": result_path, "converted": converted}
+
+class ConvertToParquetRequest(BaseModel):
+    path: str
+    deleteOriginal: bool = True
+
+
+@app.post("/api/files/convert-to-parquet")
+async def convert_to_parquet(request: ConvertToParquetRequest):
+    """Convert a CSV or Excel file to Parquet alongside it. User-triggered only."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    source_path = state.project_folder / request.path
+    try:
+        source_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = source_path.suffix.lower()
+    if ext not in {".csv", ".xlsx", ".xls"}:
+        raise HTTPException(status_code=400, detail="Only .csv, .xlsx, and .xls can be converted")
+
+    parquet_path = source_path.with_suffix(".parquet")
+    if parquet_path.exists():
+        raise HTTPException(status_code=409, detail=f"{parquet_path.name} already exists")
+
+    try:
+        if ext == ".csv":
+            print(f"[Convert] CSV → Parquet: {source_path.name}")
+            pl.scan_csv(
+                str(source_path),
+                infer_schema_length=10000,
+                null_values=["null", "NULL", "None", ""],
+            ).sink_parquet(str(parquet_path))
+        else:
+            print(f"[Convert] Excel → Parquet: {source_path.name}")
+            from openpyxl import load_workbook
+            wb = load_workbook(source_path, read_only=True)
+            sheet_name = wb.sheetnames[0]
+            wb.close()
+            pl.read_excel(source_path, sheet_name=sheet_name).write_parquet(str(parquet_path))
+    except Exception as e:
+        if parquet_path.exists():
+            parquet_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {e}")
+
+    if request.deleteOriginal:
+        try:
+            source_path.unlink()
+        except Exception as e:
+            print(f"[Convert] Could not delete original after convert: {e}")
+
+    rel_parent = Path(request.path).parent.as_posix()
+    result_path = f"{rel_parent}/{parquet_path.name}" if rel_parent not in ("", ".") else parquet_path.name
+    return {"success": True, "path": result_path}
 
 
 class DeleteFileRequest(BaseModel):
@@ -1413,14 +1498,17 @@ async def delete_file(request: DeleteFileRequest):
 
     # Collect files to clean up profiles for (before deletion)
     files_to_clean = []
-    if request.isDirectory:
-        for root, _dirs, fnames in os.walk(file_path):
-            for fname in fnames:
-                files_to_clean.append(Path(os.path.join(root, fname)))
-        shutil.rmtree(file_path)
-    else:
-        files_to_clean.append(file_path)
-        file_path.unlink()
+    try:
+        if request.isDirectory:
+            for root, _dirs, fnames in os.walk(file_path):
+                for fname in fnames:
+                    files_to_clean.append(Path(os.path.join(root, fname)))
+            shutil.rmtree(file_path)
+        else:
+            files_to_clean.append(file_path)
+            file_path.unlink()
+    except PermissionError:
+        raise HTTPException(status_code=409, detail="Your File Is Still Open! Close It Before Deleting")
 
     # Remove any cached profile files for the deleted files
     for f in files_to_clean:
@@ -1787,7 +1875,7 @@ async def filtered_preview(request: FilteredPreviewRequest):
 
     # Set up df_state
     df_state.clear()
-    df_state.file_path = str(file_path)
+    df_state.file_path = file_path.as_posix()
     if ext == ".csv":
         df_state.file_type = "csv"
         df_state.csv_separator = _detect_csv_separator(file_path)
@@ -1822,7 +1910,7 @@ async def filtered_preview(request: FilteredPreviewRequest):
     try:
         column_info = _compute_column_info(filtered_lf, df_state.columns, schema)
     except Exception:
-        column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0} for col in df_state.columns}
+        column_info = {col: {"type": "categorical", "values": [], "count": 0, "nullCount": 0, "blankCount": 0, "uniqueCount": 0} for col in df_state.columns}
     df_state.column_info = column_info
 
     # Get first chunk

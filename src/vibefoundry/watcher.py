@@ -1,7 +1,6 @@
 """
 File watching for data and script changes.
 Uses watchdog (native OS events) when available, falls back to polling.
-Auto-converts large CSVs (>100MB) to Parquet on detection.
 """
 
 import asyncio
@@ -11,10 +10,6 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 from dataclasses import dataclass, field
-
-import polars as pl
-
-CSV_TO_PARQUET_THRESHOLD = 50 * 1024 * 1024  # 50MB
 
 # Try to import watchdog, fall back to polling if not available
 try:
@@ -158,40 +153,9 @@ class FileWatcher:
         except Exception as e:
             print(f"Watcher callback error: {e}")
 
-    def _try_convert_csv_to_parquet(self, csv_path: Path):
-        """Convert large CSV to Parquet if over threshold. Runs in a background thread."""
-        try:
-            if not csv_path.exists() or csv_path.suffix.lower() != ".csv":
-                return
-            file_size = csv_path.stat().st_size
-            if file_size <= CSV_TO_PARQUET_THRESHOLD:
-                return
-
-            parquet_path = csv_path.with_suffix(".parquet")
-            print(f"[Watcher] Auto-converting large CSV to Parquet: {csv_path.name} ({file_size / 1024 / 1024:.1f} MB)")
-            pl.scan_csv(str(csv_path), infer_schema_length=10000, null_values=["null", "NULL", "None", ""]).sink_parquet(str(parquet_path))
-            csv_path.unlink()
-            print(f"[Watcher] Conversion complete: {parquet_path.name}")
-        except Exception as e:
-            print(f"[Watcher] Parquet conversion failed, keeping CSV: {e}")
-            parquet_path = csv_path.with_suffix(".parquet")
-            if parquet_path.exists():
-                parquet_path.unlink()
-
     def _handle_change(self, change: FileChange):
         """Route change events to callbacks"""
         print(f"[Watcher] {change.change_type} in {change.folder_type}: {change.path}")
-
-        # Auto-convert large CSVs to Parquet in data folders
-        if change.folder_type in ("input", "output") and change.change_type in ("created", "modified"):
-            file_path = Path(change.path)
-            if file_path.suffix.lower() == ".csv":
-                threading.Thread(
-                    target=self._try_convert_csv_to_parquet,
-                    args=(file_path,),
-                    daemon=True
-                ).start()
-                return  # Skip notifying until conversion is done — the new .parquet file will trigger its own event
 
         if change.folder_type == "input":
             self._safe_callback(self.on_data_change)

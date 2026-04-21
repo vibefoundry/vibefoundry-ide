@@ -40,6 +40,20 @@ cd frontend && npm run dev
 python -m vibefoundry.server
 ```
 
+## Publishing
+
+The publish flow reads the PyPI token from `.env` (gitignored):
+
+```
+PYPI_TOKEN=pypi-...
+```
+
+`.env` is expected to be present in the project root — `publish.sh` sources it automatically. Bump the version and ship:
+
+```bash
+./publish.sh 0.1.307
+```
+
 ## Architecture
 
 - `frontend/` - React-based UI (Vite + React)

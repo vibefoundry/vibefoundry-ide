@@ -426,6 +426,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
 
   const ext = node.extension?.toLowerCase()
   const isRunnable = !node.isDirectory && ['.py', '.sh', '.bat'].includes(ext)
+  const isConvertible = !node.isDirectory && ['.csv', '.xlsx', '.xls'].includes(ext)
 
   const handleCopyRunCommand = async () => {
     const absPath = projectPath ? `${projectPath}/${node.path}` : node.path
@@ -478,6 +479,20 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
             {copied ? 'Copied!' : 'Copy run command'}
           </div>
           {canWrite && <div className="context-menu-divider" />}
+        </>
+      )}
+
+      {canWrite && isConvertible && (
+        <>
+          <div className="context-menu-item" onClick={() => onAction('convertToParquet', node)}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 4a.5.5 0 0 1 .5.5V11.5a.5.5 0 0 1-1 0V4.5A.5.5 0 0 1 8 4z"/>
+              <path d="M4.146 8.354a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0l3.5 3.5a.5.5 0 0 1-.708.708L8 5.207 4.854 8.354a.5.5 0 0 1-.708 0z" transform="rotate(180 8 8)"/>
+              <path d="M1 13.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5z"/>
+            </svg>
+            Convert to Parquet
+          </div>
+          <div className="context-menu-divider" />
         </>
       )}
 
@@ -832,10 +847,7 @@ const FileTree = ({
 
             try {
               for (const file of files) {
-                const willConvert = file.size > 50 * 1024 * 1024 && /\.csv$/i.test(file.name)
-                if (willConvert) {
-                  setUploadStatus({ converting: true, filename: file.name })
-                }
+                setUploadStatus({ converting: false, filename: file.name })
 
                 const formData = new FormData()
                 formData.append('file', file)
@@ -865,6 +877,28 @@ const FileTree = ({
           input.click()
         }
         break
+
+      case 'convertToParquet': {
+        setUploadStatus({ converting: true, filename: node.name })
+        try {
+          const response = await fetch('/api/files/convert-to-parquet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: node.path, deleteOriginal: true })
+          })
+          if (!response.ok) {
+            const error = await response.json()
+            throw new Error(error.detail || 'Conversion failed')
+          }
+          if (onRefresh) onRefresh()
+        } catch (err) {
+          console.error('Convert to Parquet failed:', err)
+          alert('Failed to convert: ' + err.message)
+        } finally {
+          setUploadStatus(null)
+        }
+        break
+      }
     }
   }
 
@@ -993,7 +1027,7 @@ const FileTree = ({
       if (onRefresh) onRefresh()
     } catch (err) {
       console.error('Delete failed:', err)
-      alert('Failed to delete: ' + err.message)
+      alert(err.message)
     }
 
     setDeleteDialog(null)

@@ -757,6 +757,11 @@ body {
   text-align: left;
   font-weight: 600;
   color: #1b5e20;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #e8f5e9;
+  border-right: 1px solid #c8e6c9;
 }
 
 
@@ -935,6 +940,13 @@ body {
   font-size: 11px;
   justify-content: center;
   border-right: 1px solid #c0c0c0;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.df-header-cell.df-row-num {
+  z-index: 3;
 }
 
 .df-cell.selected {
@@ -1173,6 +1185,44 @@ body {
   box-shadow: 0 0 0 3px var(--color-accent-subtle);
 }
 
+.sort-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.sort-actions .sort-btn {
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text);
+  font-family: var(--font-main);
+}
+
+.sort-actions .sort-btn:hover {
+  background-color: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.sort-actions .sort-btn.active {
+  background-color: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.sort-actions .sort-clear {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 .select-actions {
   display: flex;
   gap: 8px;
@@ -1234,6 +1284,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-text);
+}
+
+.filter-checkbox-special span {
+  color: var(--color-text-muted, #888);
+  font-style: italic;
+}
+
+.filter-checkbox-special:last-of-type {
+  border-bottom: 1px solid var(--color-border, #333);
+  margin-bottom: 4px;
+  padding-bottom: 10px;
 }
 
 .filter-actions {

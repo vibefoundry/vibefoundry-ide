@@ -33,11 +33,16 @@ cd ..
 echo "Building Python package..."
 python -m build
 
-# Push to PyPI
-PYPI_TOKEN=$(cat "$SCRIPT_DIR/.pypi_token" 2>/dev/null)
+# Push to PyPI — token lives in .env (PYPI_TOKEN=...), with .pypi_token as a legacy fallback
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a; . "$SCRIPT_DIR/.env"; set +a
+fi
+if [ -z "$PYPI_TOKEN" ] && [ -f "$SCRIPT_DIR/.pypi_token" ]; then
+  PYPI_TOKEN=$(cat "$SCRIPT_DIR/.pypi_token")
+fi
 if [ -z "$PYPI_TOKEN" ]; then
-  echo "Error: .pypi_token file not found"
-  echo "Create .pypi_token in the project root with your PyPI token"
+  echo "Error: PYPI_TOKEN not set"
+  echo "Add PYPI_TOKEN=pypi-... to .env in the project root"
   exit 1
 fi
 echo "Uploading to PyPI..."
