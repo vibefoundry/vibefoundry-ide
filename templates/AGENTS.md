@@ -45,8 +45,32 @@ project_folder/           <- You are here
 ├── output_folder/        <- Scripts save results here
 └── app_folder/
     ├── meta_data/        <- Metadata describing available data
-    └── scripts/          <- Save Python scripts here
+    └── scripts/          <- Every app lives here (one folder per app)
 ```
+
+### Everything goes under `app_folder/scripts/`
+
+**ALL applications live in `app_folder/scripts/{app_name}/` — no exceptions.** This is the single source of truth for code, regardless of which track the app falls under:
+
+- **Track 1 — Python scripts:** `app_folder/scripts/{task_name}/` contains `app.py` + `step1_*.py`, `step2_*.py`, etc.
+- **Track 2 — PWA (DuckDB-WASM + React):** `app_folder/scripts/{app_name}/` contains the build script (`app.py`) **and** the PWA source files (`index.html`, `css/`, `js/`).
+- **Track 3 — Full-Stack (React + Python backend):** `app_folder/scripts/{app_name}/` contains `backend/`, `frontend/`, and the launcher scripts (`setup.sh`/`run_app.sh`/`clear_cache.sh` + `.bat` equivalents).
+
+**Never put app code at the top of `app_folder/`, at the project root, or anywhere outside `app_folder/scripts/`.** If you find yourself creating `app_folder/{app_name}/` or top-level `backend/` and `frontend/` folders, stop — move them under `app_folder/scripts/{app_name}/` instead. The only top-level folders allowed inside `app_folder/` are `scripts/` and `meta_data/`.
+
+### Every task folder MUST contain `run_app.sh` and `run_app.bat`
+
+Every single `app_folder/scripts/{app_name}/` folder — regardless of track — must contain **both** `run_app.sh` (Mac/Linux) and `run_app.bat` (Windows). These are the canonical, one-command entry points the developer uses to run the app locally. **No exceptions.**
+
+What `run_app` does varies by track:
+
+| Track | What `run_app.sh` / `run_app.bat` does |
+|---|---|
+| **Track 1 — Python pipeline** | `cd` into the task folder and `python app.py` (the orchestrator that runs `step1_*.py`, `step2_*.py`, …) |
+| **Track 2 — PWA** | Runs `python build_app_package.py` to rebuild the output package, then launches the corresponding OS launcher inside `output_folder/{app_name}/` (`mac_start.sh` or `pc_start.bat`) so the developer sees the freshly built app immediately |
+| **Track 3 — Full-Stack** | Reserves two free ports, then runs the backend and frontend concurrently (see Track 3 launcher template below). Track 3 also gets `setup.sh`/`.bat` and `clear_cache.sh`/`.bat` for dependency management. |
+
+Both `.sh` files must be `chmod +x` by the build/setup process so they're executable. The `.bat` and `.sh` files always live alongside each other inside the task folder.
 
 ## Input Data Is Sacred — Never Edit It
 
@@ -60,7 +84,7 @@ This is a hard rule with no exceptions. Even if the user says "fix the data" or 
 
 # Track 1: Python Scripts (Data Processing)
 
-**Use this track for:** data processing, analysis, cleaning, aggregation, feature engineering, statistical analysis, visualizations — anything that reads data from `input_folder/`, transforms it, and writes results to `output_folder/{task}/`. The scripts are run through the VibeFoundry IDE; no launcher scripts are required.
+**Use this track for:** data processing, analysis, cleaning, aggregation, feature engineering, statistical analysis, visualizations — anything that reads data from `input_folder/`, transforms it, and writes results to `output_folder/{task}/`. The scripts can be run through the VibeFoundry IDE *or* via the mandated `run_app.sh`/`run_app.bat` launchers (see below — every task folder gets these regardless of track).
 
 ## Answering Questions About Data
 
@@ -290,14 +314,16 @@ RUN_FOLDER = os.environ.get("VF_RUN_FOLDER", TASK_OUTPUT)
 os.makedirs(RUN_FOLDER, exist_ok=True)
 
 # Input files (from users) are typically CSV — read with scan_csv.
-# All step outputs are parquet.
+# All step outputs are parquet. See "Polars Rules" below for the lazy +
+# streaming + column-pruned defaults this template follows.
 df = (
     pl.scan_csv(os.path.join(INPUT_FOLDER, "sales.csv"))
+      .select(["customer_id", "revenue"])  # column-prune early
       .group_by("customer_id")
       .agg(pl.col("revenue").sum().alias("total_revenue"))
       .sort("total_revenue", descending=True)
       .head(10)
-      .collect()
+      .collect(engine="streaming")
 )
 df.write_parquet(os.path.join(RUN_FOLDER, f"{SCRIPT_NAME}.parquet"))
 print(f"Output saved to {RUN_FOLDER}")
@@ -436,9 +462,114 @@ Step scripts work standalone because they use `os.environ.get("VF_RUN_FOLDER", T
 
 ## Polars Rules
 
-- Use `pl.scan_csv()` / `pl.scan_parquet()` for lazy loading — NOT `pl.read_csv()`
-- Chain lazy operations, call `.collect()` only at the end
-- Only fall back to Pandas if a specific library requires it
+The default mode of operation is **lazy + streaming + column-pruned**. This is
+not stylistic — it's a 5× RAM and 8× speed difference on a single join+groupby
+(measured on a 2-file ~1 GB workload: 3.9 GB → 0.8 GB peak, 2.2 s → 0.3 s).
+Treat eager mode as the exception, not the default.
+
+### The five rules — apply in order
+
+1. **Read with `pl.scan_*`, never `pl.read_*`.**
+   `pl.scan_csv()` / `pl.scan_parquet()` build a query plan; `pl.read_*` loads
+   the whole file into RAM immediately. The only exception is files small enough
+   that you'd happily print them (lookup tables, tiny configs).
+
+2. **Column-prune immediately after every `scan_*`.**
+   `.select([only, columns, you, need])` is the cheapest RAM win available —
+   typically shrinks the dataset 3–10×. Especially before joins: a join's hash
+   table is sized by the right-hand columns it carries through.
+
+3. **Filter early, before joins and group-bys.**
+   `.filter(...)` chained on the lazy frame pushes the predicate down to the
+   parquet reader so unmatched rows never enter RAM. Filtering after the join
+   wastes the join's work.
+
+4. **Call `.collect(engine="streaming")` — not bare `.collect()`.**
+   The streaming engine processes joins and group-bys in chunks instead of
+   materializing the full intermediate. This is the single biggest RAM lever.
+   Bare `.collect()` is fine only when the final result is the only large object.
+
+5. **For multi-file workloads, prefer `pl.scan_parquet([list_of_paths])` over
+   `pl.concat([scan(...) for ...])`.** Polars treats a list of paths as one
+   logical dataset and can stream across files. If you must concat, do it lazily
+   and let streaming handle the rest.
+
+### What "efficient" looks like in practice
+
+```python
+outlets = (
+    pl.scan_parquet("Outlet Attributes.parquet")
+      .select(["OutletCode", "State"])  # rule 2
+)
+
+result = (
+    pl.scan_parquet([
+        "step1_aggregate_annual_FY25.parquet",
+        "step1_aggregate_annual_FY26.parquet",
+    ])  # rule 5
+    .filter(pl.col("Item_SellingVolumeLitres") > 0)  # rule 3
+    .join(outlets, on="OutletCode", how="left")
+    .group_by(["State", "PUConsumerBrandName"])
+    .agg(pl.col("Item_SellingVolumeLitres").sum().alias("vol"))
+    .sort("vol", descending=True)
+    .head(50)
+    .collect(engine="streaming")  # rule 4
+)
+```
+
+### What to avoid
+
+- `pl.read_parquet(big_file)` followed by transformations — loads everything,
+  defeats the optimizer.
+- Bare `.collect()` when the pipeline contains a join, group-by, sort, or pivot
+  on data larger than ~500 MB.
+- Calling `.collect()` mid-pipeline to inspect intermediate shape. Use
+  `.head(10).collect()` or `.collect_schema()` instead — neither materializes
+  the full frame.
+- `pandas` for anything except libraries that demand it. `pandas` is eager by
+  design and roughly 2× the RAM of equivalent Polars.
+
+### When eager mode is acceptable
+
+- The final step output is small (e.g., a top-N or a summary the next step
+  reads). The output of `.collect()` is a real `DataFrame` — that's expected.
+- The input file is genuinely tiny (< 50 MB on disk, < 200 MB in RAM).
+- Writing parquet: `df.write_parquet(...)` after a final collect is correct.
+
+### RAM budget — what fits where
+
+| Machine RAM | Comfortable working-set with streaming | Without streaming |
+|---|---|---|
+| 8 GB        | ~1.5 GB DataFrames in flight           | ~500 MB DataFrames |
+| 16 GB       | ~6 GB DataFrames in flight             | ~2 GB DataFrames   |
+| 32 GB       | ~16 GB DataFrames in flight            | ~6 GB DataFrames   |
+
+If a script's working-set exceeds the "without streaming" column, **streaming is
+mandatory, not optional**.
+
+- Only fall back to Pandas if a specific library requires it.
+
+## Track 1 Launcher Scripts (REQUIRED)
+
+Every Track 1 task folder must contain `run_app.sh` and `run_app.bat` alongside `app.py` and the step files. Both just `cd` into the task folder and run the orchestrator:
+
+**`run_app.sh`:**
+```bash
+#!/bin/bash
+# Run: bash app_folder/scripts/{task_name}/run_app.sh
+cd "$(dirname "$0")"
+python app.py
+```
+
+**`run_app.bat`:**
+```batch
+@echo off
+REM Run: app_folder\scripts\{task_name}\run_app.bat
+cd /d "%~dp0"
+python app.py
+```
+
+That's it for Track 1 — no `setup.sh`/`clear_cache.sh` needed since there are no Node deps. Both files must be `chmod +x` on Mac/Linux.
 
 ---
 
@@ -457,7 +588,7 @@ These apps are distributed as folders users launch with a `.bat` (Windows) or `.
 
 ### Why a local HTTP server?
 
-Browsers block `fetch()`, Workers, and WASM loading from `file://` URLs due to security restrictions. A local server on `localhost:8080` makes all browser APIs work correctly.
+Browsers block `fetch()`, Workers, and WASM loading from `file://` URLs due to security restrictions. A local HTTP server makes all browser APIs work correctly. The launcher scripts find an available port at startup and open the browser to that URL — never hardcode a port.
 
 ## PWA Folder Structure
 
@@ -465,49 +596,62 @@ Browsers block `fetch()`, Workers, and WASM loading from `file://` URLs due to s
 
 ```
 app_folder/
-├── {app_name}/                         <- App source files
-│   ├── index.html                      <- Entry point
-│   ├── css/styles.css                  <- Styles
-│   └── js/app.js                       <- React app (plain JS, no JSX)
 └── scripts/
-    └── build_{app_name}/
-        └── app.py                      <- Build script
+    └── {app_name}/                     <- Everything for this app lives here
+        ├── build_app_package.py        <- Build script (creates the output folder)
+        └── src/                        <- PWA source files
+            ├── index.html              <- Entry point
+            ├── css/styles.css          <- Styles
+            └── js/app.js               <- React app (plain JS, no JSX)
 ```
+
+The build script is **always named `build_app_package.py`**. It reads from its sibling `src/` folder and creates the distributable folder at `output_folder/{app_name}/` (the script `os.makedirs(..., exist_ok=True)` it itself — never expect the folder to exist beforehand). Both the source and the build script live together inside `app_folder/scripts/{app_name}/` — never at the top of `app_folder/`.
 
 ### Output (what gets distributed)
 
+The recipient sees only **four things** at the top of the package — three launchers and a single folder containing everything else. This keeps the user experience friendly: the recipient doesn't see a wall of files they don't recognize.
+
 ```
 output_folder/
-└── {app_name}/                         <- Distributable folder (zip and share this)
-    ├── index.html
-    ├── css/styles.css
-    ├── js/app.js
-    ├── lib/
-    │   ├── react.min.js                <- React 18 UMD production build
-    │   ├── react-dom.min.js            <- ReactDOM 18 UMD production build
-    │   ├── duckdb-bundle.js            <- DuckDB-WASM bundled with esbuild
-    │   ├── duckdb-eh.wasm              <- DuckDB WASM binary (~35 MB)
-    │   └── duckdb-browser-eh.worker.js <- DuckDB Web Worker
-    ├── data/
-    │   ├── manifest.json               <- Lists all Parquet files
-    │   └── *.parquet                   <- Data files from input_folder/
-    ├── start.bat                       <- Windows launcher (double-click)
-    ├── serve.ps1                       <- PowerShell HTTP server (called by start.bat)
-    ├── start.command                   <- Mac launcher (double-click)
-    └── start.sh                        <- Mac/Linux launcher (terminal)
+└── {app_name}/                             <- Distributable folder (zip and share this)
+    ├── pc_start.bat                        <- Windows: double-click
+    ├── mac_start.command                   <- Mac: double-click (Finder opens in Terminal)
+    ├── mac_start.sh                        <- Mac: run from Terminal (`bash mac_start.sh`)
+    └── application_files/                  <- Everything else lives here
+        ├── index.html
+        ├── css/styles.css
+        ├── js/app.js
+        ├── lib/
+        │   ├── react.min.js                <- React 18 UMD production build
+        │   ├── react-dom.min.js            <- ReactDOM 18 UMD production build
+        │   ├── duckdb-bundle.js            <- DuckDB-WASM bundled with esbuild
+        │   ├── duckdb-eh.wasm              <- DuckDB WASM binary (~35 MB)
+        │   └── duckdb-browser-eh.worker.js <- DuckDB Web Worker
+        ├── data/
+        │   ├── manifest.json               <- Lists all Parquet files
+        │   └── *.parquet                   <- Data files from input_folder/
+        └── serve.ps1                       <- PowerShell HTTP server (called by pc_start.bat)
 ```
+
+**Top-level rule:** the package's top level contains exactly `pc_start.bat`, `mac_start.command`, `mac_start.sh`, and `application_files/`. **Nothing else.** All assets, data, and helper scripts live inside `application_files/`. Every launcher file `cd`s into `application_files/` before doing anything.
+
+**Why ship both `mac_start.command` and `mac_start.sh`?** They contain the same bash logic — only the extension differs:
+- **`.command`** is the double-click path. Finder opens it in Terminal automatically. Recipients hit a Gatekeeper "macOS cannot verify the developer" prompt on first launch — they right-click → Open the first time, double-click thereafter.
+- **`.sh`** is the Terminal-only path. Power users (or anyone who hits a stuck Gatekeeper block on Sequoia) can run `bash mac_start.sh` from Terminal and skip the prompt entirely.
+
+The build script must `chmod +x` both Mac files so they're executable.
 
 ## Build Script Template
 
-The build script (`app_folder/scripts/build_{app_name}/app.py`) runs on the **developer's machine** (requires Node.js for the one-time esbuild step). It produces the distributable folder in `output_folder/`.
+The build script (`app_folder/scripts/{app_name}/build_app_package.py`) runs on the **developer's machine** (requires Node.js for the one-time esbuild step). It creates `output_folder/{app_name}/` (`os.makedirs(..., exist_ok=True)`), reads source files from its sibling `src/` folder, and writes the distributable contents into the new folder.
 
 ### What the build script does (5 steps):
 
-1. **Bundle DuckDB-WASM** — `npm install @duckdb/duckdb-wasm esbuild` in a temp dir, bundle with esbuild into a single IIFE script, copy the `.wasm` and worker files
-2. **Download React** — fetch React 18 UMD production builds from unpkg CDN
-3. **Copy app files** — `index.html`, `css/styles.css`, `js/app.js` from the app source folder
-4. **Copy Parquet data + generate manifest** — copy all `.parquet` files from `input_folder/`, write `data/manifest.json`
-5. **Create launcher scripts** — `start.bat`, `serve.ps1`, `start.command`, `start.sh`
+1. **Bundle DuckDB-WASM** — `npm install @duckdb/duckdb-wasm esbuild` in a temp dir, bundle with esbuild into a single IIFE script, copy the `.wasm` and worker files into `application_files/lib/`
+2. **Download React** — fetch React 18 UMD production builds from unpkg CDN into `application_files/lib/`
+3. **Copy app files** — `index.html`, `css/styles.css`, `js/app.js` from `app_folder/scripts/{app_name}/src/` into `application_files/`
+4. **Copy Parquet data + generate manifest** — copy all `.parquet` files from `input_folder/` into `application_files/data/`, write `application_files/data/manifest.json`
+5. **Create launcher scripts at the package top level** — `pc_start.bat`, `mac_start.command`, `mac_start.sh` (the three launchers); `serve.ps1` goes inside `application_files/` since it's invoked by `pc_start.bat`. The build script must `os.chmod(..., 0o755)` on `mac_start.command` and `mac_start.sh` so they're executable.
 
 ### esbuild bundling approach:
 
@@ -665,9 +809,11 @@ if (cnt <= 80) {
 
 ## PWA Launcher Scripts
 
-### Windows: start.bat + serve.ps1
+All launchers sit at the package top level. They `cd` into `application_files/` before doing any work — the user never sees `application_files/` referenced in the launcher path, just the launcher name.
 
-`start.bat` opens the browser and launches the PowerShell HTTP server:
+### Windows: pc_start.bat (top level) + serve.ps1 (inside application_files/)
+
+`pc_start.bat` launches the PowerShell HTTP server. `serve.ps1` finds an available port at startup, prints the URL, and opens the browser itself — `pc_start.bat` does not hardcode any port:
 
 ```batch
 @echo off
@@ -675,11 +821,30 @@ echo ========================================
 echo  {App Title}
 echo ========================================
 echo.
-echo Starting on http://localhost:8080
+echo Starting server on an available port...
 echo Close this window to stop the server.
 echo.
-start http://localhost:8080
-powershell -ExecutionPolicy Bypass -File "%~dp0serve.ps1"
+cd /d "%~dp0application_files"
+powershell -ExecutionPolicy Bypass -File "serve.ps1"
+```
+
+Inside `serve.ps1` (which lives at `application_files/serve.ps1`), find a free port by binding a `TcpListener` to port 0 (the OS picks one), close the listener, then start `HttpListener` on that port and `Start-Process` the URL:
+
+```powershell
+# Pick any free port
+$probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$probe.Start()
+$port = $probe.LocalEndpoint.Port
+$probe.Stop()
+
+$url = "http://localhost:$port/"
+Write-Host "Serving on $url"
+Start-Process $url
+
+$http = [System.Net.HttpListener]::new()
+$http.Prefixes.Add($url)
+$http.Start()
+# ... request loop ...
 ```
 
 `serve.ps1` is a PowerShell HTTP server using `System.Net.HttpListener`. It must serve these MIME types:
@@ -695,23 +860,38 @@ powershell -ExecutionPolicy Bypass -File "%~dp0serve.ps1"
 
 **The `.wasm` MIME type is critical.** Without `application/wasm`, browsers refuse to compile the WASM binary.
 
-### Mac: start.command + start.sh
+### Mac: mac_start.command + mac_start.sh (both at top level)
+
+Both files contain **identical bash logic** — only the extension differs. Ship both. The build script must `os.chmod(path, 0o755)` on each so they're executable. The first thing each script does is **strip `com.apple.quarantine` from the entire package folder** — this is the Mac equivalent of Windows "Unblock", and it means after one successful run, future double-clicks work without any Gatekeeper prompt:
 
 ```bash
 #!/bin/bash
-cd "$(dirname "$0")"
+PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Strip quarantine from the whole package — Mac equivalent of Windows "Unblock".
+# After this runs once, double-clicking mac_start.command works with no prompt.
+xattr -dr com.apple.quarantine "$PACKAGE_DIR" 2>/dev/null
+
+cd "$PACKAGE_DIR/application_files"
 echo "========================================"
 echo " {App Title}"
 echo "========================================"
 echo ""
-echo "Starting on http://localhost:8080"
+# Pick any free port — bind to 0, OS assigns one, close immediately
+PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1]); s.close()")
+echo "Starting on http://localhost:$PORT"
 echo "Press Ctrl+C to stop."
 echo ""
-open http://localhost:8080
-python3 -m http.server 8080
+open "http://localhost:$PORT"
+python3 -m http.server "$PORT"
 ```
 
-`start.command` is for double-clicking in Finder. `start.sh` is the same but for terminal use. Both use Python's built-in HTTP server (pre-installed on Mac).
+**Why ship both extensions?**
+
+- **`mac_start.command`** — for double-clicking in Finder (opens in Terminal automatically). After the first successful run via either launcher has stripped quarantine, this just works.
+- **`mac_start.sh`** — the **unblock entry point**. The user right-clicks it → **Open With** → **Terminal** → clicks **Open** in the Gatekeeper dialog. This bypasses Gatekeeper *and* runs the `xattr -dr` line, which strips quarantine from every file in the package. From then on, plain double-click on `mac_start.command` works without prompts.
+
+This gives Mac users the same workflow Windows users have with right-click → Unblock: a one-time "open this once to unblock everything" step, then frictionless double-clicks forever after.
 
 ## Distribution
 
@@ -728,17 +908,28 @@ cd output_folder && zip -r {app_name}.zip {app_name}/
 **Windows:**
 1. Right-click the `.zip` file → **Properties** → check **Unblock** → **Apply**
 2. Extract the zip
-3. Double-click `start.bat`
+3. Double-click `pc_start.bat`
 
 **Mac:**
 1. Extract the zip
-2. Double-click `start.command` (or run `bash start.sh` in Terminal)
+2. **First-time unblock:** right-click `mac_start.sh` → **Open With** → **Terminal**. macOS will warn you ("cannot verify the developer") — click **Open**. The script runs once, strips the quarantine flag from every file in the package, and launches the app. This is the Mac equivalent of Windows right-click → Unblock.
+3. **Every time after:** just double-click `mac_start.command`. No prompts — quarantine is gone.
+4. **If macOS Sequoia blocks even right-click → Open** (rare): go **System Settings** → **Privacy & Security** → click **Open Anyway** for `mac_start.sh`, then repeat step 2.
 
-### Mark of the Web (MOTW)
+### Mark of the Web (MOTW) — Windows
 
 Files downloaded from the internet (SharePoint, OneDrive, email) get tagged with MOTW by Windows. This prevents `.bat` files from running. **The user must unblock the zip before extracting.** Unblocking the zip before extraction ensures all extracted files are clean.
 
 Alternative: if users have 7-Zip installed, it strips MOTW automatically during extraction.
+
+### Gatekeeper / Quarantine — Mac
+
+Mac equivalent of MOTW. Downloaded zip files extract with a `com.apple.quarantine` attribute on every file inside, which makes Gatekeeper block executables on first launch. There's no clean "Unblock" option in Finder like Windows has. The two ways past it:
+
+1. **Right-click → Open** on `mac_start.command` (instead of double-click) on first launch — Gatekeeper shows the warning but offers an **Open** button. Once approved, future double-clicks work normally.
+2. **Run `mac_start.sh` from Terminal** — `bash mac_start.sh`. Bypasses the Finder-level Gatekeeper prompt, though the script's first execution can still trigger a warning depending on macOS version.
+
+The only way to skip these prompts entirely is to code-sign and notarize with an Apple Developer ID ($99/yr). Not worth it for internal distribution — just include the right-click → Open instruction in your README.
 
 ## Performance Notes
 
@@ -870,7 +1061,7 @@ raw = pl.scan_parquet("input_folder/sales.parquet")
 summary = (
     raw.group_by(["region", "month"])
     .agg(pl.col("revenue").sum(), pl.col("units").sum())
-    .collect()
+    .collect(engine="streaming")
 )
 summary.write_parquet("output_folder/app_name/data/sales_summary.parquet")
 
@@ -879,6 +1070,44 @@ summary.write_parquet("output_folder/app_name/data/sales_summary.parquet")
 
 The app loads the small summary first (instant), and only fetches the full dataset if the user drills down.
 
+## Track 2 Dev Launcher Scripts (REQUIRED)
+
+Every PWA task folder must contain `run_app.sh` and `run_app.bat` alongside `build_app_package.py` and `src/`. These are the **developer's** one-command launchers — they rebuild the package and immediately launch the OS-appropriate launcher inside `output_folder/{app_name}/`. Don't confuse them with the recipient-facing launchers (`pc_start.bat` / `mac_start.command` / `mac_start.sh`) that ship inside the output package.
+
+**`run_app.sh`:**
+```bash
+#!/bin/bash
+# Run: bash app_folder/scripts/{app_name}/run_app.sh
+cd "$(dirname "$0")"
+APP_NAME="$(basename "$(pwd)")"
+
+echo "[1/2] Building app package..."
+python build_app_package.py || exit 1
+
+echo "[2/2] Launching..."
+PROJECT_DIR="$(cd ../../.. && pwd)"
+OUTPUT_PKG="$PROJECT_DIR/output_folder/$APP_NAME"
+bash "$OUTPUT_PKG/mac_start.sh"
+```
+
+**`run_app.bat`:**
+```batch
+@echo off
+REM Run: app_folder\scripts\{app_name}\run_app.bat
+cd /d "%~dp0"
+for %%I in ("%cd%") do set APP_NAME=%%~nxI
+
+echo [1/2] Building app package...
+python build_app_package.py
+if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+
+echo [2/2] Launching...
+cd /d "%~dp0..\..\..\output_folder\%APP_NAME%"
+call pc_start.bat
+```
+
+`run_app.sh` must be `chmod +x` so it runs without `bash` prefix. The launcher is OS-specific by design — Mac developers use `.sh`, Windows developers use `.bat`. Both rebuild + serve in one step so the developer always sees their latest source changes.
+
 ## PWA Constraints and Gotchas
 
 1. **No JSX** — all React code must use `React.createElement`. No transpiler runs on the user's machine.
@@ -886,7 +1115,7 @@ The app loads the small summary first (instant), and only fetches the full datas
 3. **No Node.js on user's machine** — Node.js is only needed on the developer's machine during `build_`.
 4. **No Python on user's Windows machine** — that's why Windows uses PowerShell for the HTTP server instead of `python3 -m http.server`.
 5. **Absolute URLs for WASM/Worker** — always derive from `window.location.href`, never use relative paths.
-6. **Port 8080** — hardcoded in all launchers. If the user has something else on 8080, they'll need to edit the scripts.
+6. **Dynamic port** — launcher scripts pick an available port at startup (bind to port 0, OS assigns one). Never hardcode a port number.
 7. **Single user** — this runs on localhost, no auth, no multi-user. One person at a time.
 8. **Parquet only** — DuckDB-WASM reads Parquet natively. For CSV input, convert to Parquet in the build script.
 9. **MOTW on Windows** — users must unblock the zip before extracting, or use 7-Zip.
@@ -902,24 +1131,30 @@ When asked to build a dashboard or interactive tool that needs a backend, first 
 
 ## React + Python
 
-- Backend (Flask/FastAPI) on **port 5000**, frontend on **port 3000**
-- Backend must enable CORS for `http://localhost:3000`
+- Backend (Flask/FastAPI) and frontend (Vite) each pick an **available port** at startup — never hardcode `5000`/`3000` or any specific port
+- The launcher script reserves two free ports up front and passes them to both processes via env vars (`BACKEND_PORT`, `FRONTEND_PORT`); the frontend's Vite proxy reads `BACKEND_PORT` so `/api` calls go to the right place
+- Backend CORS allows any `http://localhost:<port>` origin so the dynamic frontend port works
 - Use Polars for all backend data processing
 - Paginate API endpoints that return data — never return full datasets
 - Filter and sort server-side
 
 ```
 project_folder/
-├── backend/
-│   ├── app.py              <- Flask/FastAPI backend (port 5000)
-│   └── requirements.txt
-├── frontend/
-│   ├── package.json
-│   └── src/
-└── app_folder/scripts/
-    ├── run_app.sh          <- macOS/Linux launcher
-    └── run_app.bat         <- Windows launcher
+└── app_folder/
+    └── scripts/
+        └── {app_name}/                 <- Everything for this app lives here
+            ├── backend/
+            │   ├── app.py              <- Flask/FastAPI backend (port from BACKEND_PORT env)
+            │   └── requirements.txt
+            ├── frontend/
+            │   ├── package.json
+            │   └── src/
+            ├── setup.sh / setup.bat
+            ├── run_app.sh / run_app.bat
+            └── clear_cache.sh / clear_cache.bat
 ```
+
+The `backend/`, `frontend/`, and launcher scripts all live together inside `app_folder/scripts/{app_name}/` — never at the project root. Launcher scripts `cd "%~dp0"` (own folder) so `backend/` and `frontend/` are direct siblings. The backend's `PROJECT_DIR` walks up 5 levels to reach `project_folder/` (`backend/` → `{app_name}/` → `scripts/` → `app_folder/` → `project_folder/`).
 
 ### Backend Template (backend/app.py)
 
@@ -929,11 +1164,15 @@ from flask_cors import CORS
 import polars as pl
 import os
 import json
+import re
+import socket
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:3000"])
+# Allow any localhost origin so the frontend can pick a dynamic port
+CORS(app, origins=re.compile(r"^http://localhost:\d+$"))
 
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# 5 levels up: backend/ → {app_name}/ → scripts/ → app_folder/ → project_folder/
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 INPUT_FOLDER = os.path.join(PROJECT_DIR, "input_folder")
 OUTPUT_FOLDER = os.path.join(PROJECT_DIR, "output_folder")
 
@@ -950,6 +1189,14 @@ def get_cached_or_compute(file_path, compute_fn):
     _cache[cache_key] = {"mtime": mtime, "data": result}
     return result
 
+def find_free_port():
+    """Bind to port 0, let the OS pick a free port, then close."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
@@ -957,7 +1204,10 @@ def health():
 # Add your API routes here — always paginated, always server-side filtered
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # Prefer the launcher-provided port; fall back to any free port
+    port = int(os.environ.get("BACKEND_PORT") or find_free_port())
+    print(f"Backend running on http://localhost:{port}")
+    app.run(host="0.0.0.0", port=port, debug=True)
 ```
 
 ### backend/requirements.txt
@@ -970,13 +1220,28 @@ polars
 
 ### Frontend Setup
 
-Use Create React App or Vite. In `package.json`, add a proxy for development:
+Use Vite. The dev server reads its port from `FRONTEND_PORT` and proxies `/api` to whatever port the backend is on (passed in as `BACKEND_PORT`). Both come from the launcher script — never hardcoded.
 
-```json
-{
-  "proxy": "http://localhost:5000"
-}
+```js
+// vite.config.js
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  server: {
+    // 0 lets Vite pick a free port if FRONTEND_PORT isn't set
+    port: Number(process.env.FRONTEND_PORT) || 0,
+    strictPort: false,
+    proxy: {
+      '/api': {
+        target: `http://localhost:${process.env.BACKEND_PORT}`,
+        changeOrigin: true,
+      },
+    },
+  },
+})
 ```
+
+If you're using Create React App instead, replace the `package.json` `"proxy"` field with the `http-proxy-middleware` `setupProxy.js` pattern so the target can read `process.env.BACKEND_PORT` at runtime — `package.json`'s static `"proxy"` field can't reference env vars.
 
 ### Example: Paginated API Endpoint
 
@@ -1017,11 +1282,11 @@ def get_data():
 
 ## Streamlit
 
-Place the script in `app_folder/scripts/`. The IDE detects and runs it automatically.
+Place the script in `app_folder/scripts/{app_name}/`. The IDE detects and runs it automatically.
 
-## Launcher Scripts (REQUIRED)
+## Track 3 Launcher Scripts (REQUIRED)
 
-When building any app with a frontend/backend, you **MUST** create **6 launcher scripts** in `app_folder/scripts/`:
+Track 3 follows the universal "every task folder has `run_app.sh`/`.bat`" rule, but adds **two more pairs** because of the Node + Python dependency surface. Every Track 3 task folder must contain **6 launcher scripts** in `app_folder/scripts/{app_name}/` (alongside `backend/` and `frontend/`):
 
 - `setup.sh` / `setup.bat` — One-time dependency install (idempotent, skips what's already installed)
 - `run_app.sh` / `run_app.bat` — Starts the app (fast, no installs, single terminal)
@@ -1043,8 +1308,9 @@ When building any app with a frontend/backend, you **MUST** create **6 launcher 
 
 ```batch
 @echo off
-REM Run: app_folder\scripts\setup.bat
-cd /d "%~dp0\..\.."
+REM Run: app_folder\scripts\{app_name}\setup.bat
+REM cd to this script's own folder — backend\ and frontend\ are siblings here
+cd /d "%~dp0"
 
 echo ========================================
 echo  Project Setup
@@ -1085,7 +1351,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo ========================================
-echo  Setup complete! Run: app_folder\scripts\run_app.bat
+echo  Setup complete! Run: app_folder\scripts\{app_name}\run_app.bat
 echo ========================================
 ```
 
@@ -1093,13 +1359,14 @@ echo ========================================
 
 ```batch
 @echo off
-REM Run: app_folder\scripts\run_app.bat
-cd /d "%~dp0\..\.."
+REM Run: app_folder\scripts\{app_name}\run_app.bat
+REM cd to this script's own folder — backend\ and frontend\ are siblings here
+cd /d "%~dp0"
 
 REM Check dependencies
 if not exist "frontend\node_modules" (
     echo Dependencies not installed. Run setup.bat first.
-    echo   app_folder\scripts\setup.bat
+    echo   app_folder\scripts\{app_name}\setup.bat
     exit /b 1
 )
 
@@ -1107,11 +1374,13 @@ echo ========================================
 echo  Launching App
 echo ========================================
 
-REM Kill any existing processes on ports 5000 and 3000
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5000 ^| findstr LISTENING') do taskkill /PID %%a /F >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :3000 ^| findstr LISTENING') do taskkill /PID %%a /F >nul 2>&1
+REM Reserve two free ports up front so frontend + backend agree on what's used.
+REM Python binds to port 0, OS assigns a free port, prints it.
+for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set BACKEND_PORT=%%p
+for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set FRONTEND_PORT=%%p
 
-echo Starting app on http://localhost:3000 ...
+echo Backend  : http://localhost:%BACKEND_PORT%
+echo Frontend : http://localhost:%FRONTEND_PORT%
 cd frontend
 call npx concurrently -n "backend,frontend" -c "blue,green" "cd /d \"%cd%\..\" && python backend\app.py" "npm run dev"
 ```
@@ -1120,8 +1389,9 @@ call npx concurrently -n "backend,frontend" -c "blue,green" "cd /d \"%cd%\..\" &
 
 ```batch
 @echo off
-REM Run: app_folder\scripts\clear_cache.bat
-cd /d "%~dp0\..\.."
+REM Run: app_folder\scripts\{app_name}\clear_cache.bat
+REM cd to this script's own folder — backend\ and frontend\ are siblings here
+cd /d "%~dp0"
 
 echo ========================================
 echo  Clearing Cache
@@ -1147,8 +1417,9 @@ call "%~dp0setup.bat"
 
 ```bash
 #!/bin/bash
-# Run: bash app_folder/scripts/setup.sh
-cd "$(dirname "$0")/../.."
+# Run: bash app_folder/scripts/{app_name}/setup.sh
+# cd to this script's own folder — backend/ and frontend/ are siblings here
+cd "$(dirname "$0")"
 
 echo "========================================"
 echo " Project Setup"
@@ -1187,7 +1458,7 @@ fi
 
 echo ""
 echo "========================================"
-echo " Setup complete! Run: bash app_folder/scripts/run_app.sh"
+echo " Setup complete! Run: bash app_folder/scripts/{app_name}/run_app.sh"
 echo "========================================"
 ```
 
@@ -1195,13 +1466,14 @@ echo "========================================"
 
 ```bash
 #!/bin/bash
-# Run: bash app_folder/scripts/run_app.sh
-cd "$(dirname "$0")/../.."
+# Run: bash app_folder/scripts/{app_name}/run_app.sh
+# cd to this script's own folder — backend/ and frontend/ are siblings here
+cd "$(dirname "$0")"
 
 # Check dependencies
 if [ ! -d "frontend/node_modules" ]; then
     echo "Dependencies not installed. Run setup.sh first."
-    echo "  bash app_folder/scripts/setup.sh"
+    echo "  bash app_folder/scripts/{app_name}/setup.sh"
     exit 1
 fi
 
@@ -1209,11 +1481,13 @@ echo "========================================"
 echo " Launching App"
 echo "========================================"
 
-# Kill any existing processes on ports 5000 and 3000
-lsof -ti:5000 | xargs kill -9 2>/dev/null
-lsof -ti:3000 | xargs kill -9 2>/dev/null
+# Reserve two free ports up front so frontend + backend agree on what's used.
+# Python binds to port 0, OS assigns a free port, prints it.
+export BACKEND_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+export FRONTEND_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
 
-echo "Starting app on http://localhost:3000 ..."
+echo "Backend  : http://localhost:$BACKEND_PORT"
+echo "Frontend : http://localhost:$FRONTEND_PORT"
 cd frontend
 npx concurrently -n "backend,frontend" -c "blue,green" \
     "cd .. && python backend/app.py" \
@@ -1224,8 +1498,9 @@ npx concurrently -n "backend,frontend" -c "blue,green" \
 
 ```bash
 #!/bin/bash
-# Run: bash app_folder/scripts/clear_cache.sh
-cd "$(dirname "$0")/../.."
+# Run: bash app_folder/scripts/{app_name}/clear_cache.sh
+# cd to this script's own folder — backend/ and frontend/ are siblings here
+cd "$(dirname "$0")"
 
 echo "========================================"
 echo " Clearing Cache"
@@ -1243,25 +1518,27 @@ rm -rf frontend/build frontend/dist
 echo ""
 echo "Cache cleared. Running setup..."
 echo ""
-bash app_folder/scripts/setup.sh
+bash "$(dirname "$0")/setup.sh"
 ```
 
 ### Non-React Apps (Simple Python Scripts or Streamlit)
 
-For simple scripts without a frontend, only `run_app` scripts are needed (no setup/clear_cache):
+For simple scripts without a frontend, only `run_app` scripts are needed (no setup/clear_cache). They live alongside the script inside `app_folder/scripts/{app_name}/`:
 
 **run_app.bat:**
 ```batch
 @echo off
-REM Run: app_folder\scripts\run_app.bat
-cd /d "%~dp0\..\.."
-python app_folder\scripts\your_script.py
+REM Run: app_folder\scripts\{app_name}\run_app.bat
+REM cd to this script's own folder — your_script.py is a sibling
+cd /d "%~dp0"
+python your_script.py
 ```
 
 **run_app.sh:**
 ```bash
 #!/bin/bash
-# Run: bash app_folder/scripts/run_app.sh
-cd "$(dirname "$0")/../.."
-python app_folder/scripts/your_script.py
+# Run: bash app_folder/scripts/{app_name}/run_app.sh
+# cd to this script's own folder — your_script.py is a sibling
+cd "$(dirname "$0")"
+python your_script.py
 ```

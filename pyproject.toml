@@ -61,4 +61,4 @@ Repository = "https://github.com/vibefoundry/vibefoundry-ide"
 where = ["src"]
 
 [tool.setuptools.package-data]
-vibefoundry = ["static/**/*", "templates/*"]
+vibefoundry = ["static/**/*"]
