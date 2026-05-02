@@ -736,7 +736,7 @@ function App() {
     }
   }, [projectPath])
 
-  // Build project structure - creates folders and copies CLAUDE.md
+  // Build project structure - creates folders and copies AGENTS.md
   const handleBuildProject = async () => {
     if (!projectPath || !canWrite) return
 

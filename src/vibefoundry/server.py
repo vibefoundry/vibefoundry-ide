@@ -530,7 +530,7 @@ async def build_project():
     templates_dir = Path(__file__).parent / "templates"
     TEMPLATE_BASE_URL = "https://vibefoundry.ai/templates"
 
-    for filename in ("CLAUDE.md", "AGENTS.md"):
+    for filename in ("AGENTS.md",):
         dest = state.project_folder / filename
         # Try downloading the latest version from the website
         try:
@@ -600,7 +600,6 @@ async def build_project():
     return {
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
-        "claude_md_copied": (state.project_folder / "CLAUDE.md").exists(),
         "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
         "git_initialized": git_initialized
     }
