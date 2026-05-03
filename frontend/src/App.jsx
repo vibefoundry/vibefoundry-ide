@@ -715,7 +715,7 @@ function App() {
             // light purple so the single page-background grid shows
             // through — no independent grid on the banner or card body.
             logoBox: {
-              background: 'rgba(124, 58, 237, 0.50)',
+              background: 'rgba(76, 29, 149, 0.62)',
               margin: '0 -28px 16px -28px',
               padding: '40px 0',
               flexDirection: 'column',
