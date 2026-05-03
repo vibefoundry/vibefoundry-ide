@@ -704,35 +704,45 @@ function App() {
           elements: {
             rootBox: { width: '380px' },
             card: {
-              background: '#dbeafe',
+              // Translucent baby blue so the page background grid shows
+              // through the card body directly — same grid pattern, no
+              // duplication, no seam.
+              background: 'rgba(191, 219, 254, 0.45)',
+              backdropFilter: 'blur(2px)',
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
               border: '1px solid #93c5fd',
-              padding: '0 32px 32px 32px',
+              padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },
             // Banner = just the logo box, bled to card edges with blue + grid.
-            // The title text below the banner is plain dark on white.
+            // Sized large for visual weight.
             logoBox: {
               background: '#2563eb',
               backgroundImage: `
                 linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
                 linear-gradient(90deg, rgba(255,255,255,0.16) 1px, transparent 1px)
               `,
-              backgroundSize: '24px 24px',
-              margin: '0 -32px 24px -32px',
-              padding: '32px 0',
+              backgroundSize: '32px 32px',
+              margin: '0 -28px 16px -28px',
+              padding: '72px 0',
               justifyContent: 'center',
             },
-            logoImage: { height: '48px', width: 'auto', filter: 'brightness(0) invert(1)' },
+            logoImage: { height: '128px', width: 'auto', filter: 'brightness(0) invert(1)' },
             header: {
               background: 'transparent',
-              margin: '0 0 20px 0',
+              margin: '0 0 12px 0',
               padding: '0',
               textAlign: 'center',
             },
-            headerTitle: { color: '#0f172a', fontSize: '17px', fontWeight: '600' },
+            headerTitle: { color: '#0f172a', fontSize: '17px', fontWeight: '600', margin: '0' },
             headerSubtitle: { display: 'none' },
+            // Tighten the form column — Clerk's defaults leave a lot of vertical air.
+            main: { gap: '12px' },
+            form: { gap: '12px' },
+            formFieldRow: { margin: '0' },
+            formField: { margin: '0' },
             formFieldLabel: { display: 'none' },
+            formButtonPrimary: { marginTop: '4px' },
             footer: { display: 'none' },
             badge: { display: 'none' },
           },
