@@ -1,14 +1,13 @@
 # VibeFoundry IDE
 
-A local desktop IDE for data analysis with Claude Code running in a GitHub Codespace sandbox.
+A local desktop IDE for data analysis.
 
 ## Features
 
 - **Local File Management** - Browse and manage your project files
-- **Codespace Integration** - Connect to a GitHub Codespace running Claude Code
 - **Script Runner** - Run Python scripts locally with auto-preview of outputs
 - **Data Preview** - View CSV, Excel, and image files directly in the IDE
-- **Bidirectional Sync** - Scripts sync between local and codespace
+- **Auto-generated metadata** - Per-folder schema digest for input/output data
 
 ## Installation
 

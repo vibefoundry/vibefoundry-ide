@@ -1,21 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
-import CodespaceSync from './components/CodespaceSync'
-import Terminal from './components/Terminal'
-import LocalTerminal from './components/LocalTerminal'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
-import LoginScreen from './components/LoginScreen'
-import SplitWorkspace from './components/SplitWorkspace'
 import {
   getFileType,
   getExtension
 } from './utils/fileSystem'
-import { listAllFiles, getFile, syncScriptsToLocal, pushScriptsToCodespace } from './utils/codespaceSync'
-import { getStoredUser } from './utils/github'
-import { validateAccess } from './utils/auth'
 import './App.css'
 
 function App() {
@@ -26,54 +17,25 @@ function App() {
   const [folderName, setFolderName] = useState(null)
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [isResizing, setIsResizing] = useState(false)
-  const [showTerminal, setShowTerminal] = useState(false)
-  const [terminalCollapsed, setTerminalCollapsed] = useState(true) // Hidden by default
-  const [terminalMode, setTerminalMode] = useState(null) // null | 'virtual' | 'local'
-  const [syncControlsCollapsed, setSyncControlsCollapsed] = useState(false) // Collapse sidebar sync controls
-  const [canWrite, setCanWrite] = useState(false) // Track if we have write access
+  const [canWrite, setCanWrite] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null) // 'saving', 'saved', 'error'
   const [showBuildModal, setShowBuildModal] = useState(false)
   const [isScaffolding, setIsScaffolding] = useState(false)
-  const [syncConnection, setSyncConnection] = useState({ syncUrl: null, isConnected: false })
-  const [activeTab, setActiveTab] = useState('local') // 'local' or 'codespace'
-  const [codespaceFiles, setCodespaceFiles] = useState([])
-  const [loadingCodespaceFiles, setLoadingCodespaceFiles] = useState(false)
-  const [codespaceExpandedPaths, setCodespaceExpandedPaths] = useState(new Set())
   const [showPreview, setShowPreview] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(() => localStorage.getItem('previewUrl') || '')
-  const [isPulling, setIsPulling] = useState(false)
-  const [isPushing, setIsPushing] = useState(false)
-  const [deletedFileToast, setDeletedFileToast] = useState(null) // { filename } for toast animation
+  const [deletedFileToast, setDeletedFileToast] = useState(null)
   const [showFolderPicker, setShowFolderPicker] = useState(true)
   const [projectPath, setProjectPath] = useState(null)
-  const [scriptRunnerHeight, setScriptRunnerHeight] = useState(null) // null = calculate 1/4 on mount
+  const [scriptRunnerHeight, setScriptRunnerHeight] = useState(null)
   const [isResizingScriptRunner, setIsResizingScriptRunner] = useState(false)
-  const [terminalWidth, setTerminalWidth] = useState(720)
-  const [isResizingTerminal, setIsResizingTerminal] = useState(false)
-  const [scriptChangeEvent, setScriptChangeEvent] = useState(null) // Script change from WebSocket
-  const [lastTerminalActivity, setLastTerminalActivity] = useState(null) // Timestamp of last terminal output
-
-  // Terminal modal position and size (draggable/resizable)
-  const [terminalModalPos, setTerminalModalPos] = useState({ x: null, y: null }) // null = centered
-  const [terminalModalSize, setTerminalModalSize] = useState({ width: 900, height: 700 })
-  const [isDraggingTerminal, setIsDraggingTerminal] = useState(false)
-  const [isResizingTerminalModal, setIsResizingTerminalModal] = useState(false)
-  const [codespaceCollapsed, setCodespaceCollapsed] = useState(false)
-  const [terminalMinimizing, setTerminalMinimizing] = useState(false)
+  const [scriptChangeEvent, setScriptChangeEvent] = useState(null)
   const [showNewFolderModal, setShowNewFolderModal] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [creatingFolder, setCreatingFolder] = useState(false)
-  const [showSplitWorkspace, setShowSplitWorkspace] = useState(false)
 
-  // Auth state - uses existing GitHub auth from CodespaceSync
-  const [authStatus, setAuthStatus] = useState('checking') // 'checking', 'not_logged_in', 'denied', 'allowed', 'error'
-  const [authUser, setAuthUser] = useState(null) // GitHub user from github.js
-
-  const rootHandleRef = useRef(null)
   const mainContentRef = useRef(null)
   const pollIntervalRef = useRef(null)
   const suppressAnimationsRef = useRef(false)
-  const lastSyncRef = useRef({})
   const autoPreviewDebounceRef = useRef(null)
   const isAutoPreviewingRef = useRef(false)
 
@@ -154,159 +116,6 @@ function App() {
     handle.addEventListener('pointerup', onEnd)
     handle.addEventListener('pointercancel', onEnd)
   }, [scriptRunnerHeight])
-
-  // Terminal pane resize handler
-  const isResizingTerminalRef = useRef(false)
-
-  const handleTerminalResizeStart = useCallback((e) => {
-    e.preventDefault()
-    const handle = e.currentTarget
-    const pointerId = e.pointerId
-    try { handle.setPointerCapture(pointerId) } catch {}
-    isResizingTerminalRef.current = true
-    setIsResizingTerminal(true)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-
-    const onMove = (ev) => {
-      if (!isResizingTerminalRef.current) return
-      ev.preventDefault()
-      const newWidth = Math.max(400, Math.min(1200, window.innerWidth - ev.clientX))
-      setTerminalWidth(newWidth)
-    }
-
-    const onEnd = () => {
-      isResizingTerminalRef.current = false
-      setIsResizingTerminal(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      try { handle.releasePointerCapture(pointerId) } catch {}
-      handle.removeEventListener('pointermove', onMove)
-      handle.removeEventListener('pointerup', onEnd)
-      handle.removeEventListener('pointercancel', onEnd)
-    }
-
-    handle.addEventListener('pointermove', onMove)
-    handle.addEventListener('pointerup', onEnd)
-    handle.addEventListener('pointercancel', onEnd)
-  }, [])
-
-  // Terminal modal drag handler
-  const handleTerminalDragStart = useCallback((e) => {
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return
-    e.preventDefault()
-    setIsDraggingTerminal(true)
-    document.body.style.cursor = 'move'
-    document.body.style.userSelect = 'none'
-
-    const startX = e.clientX
-    const startY = e.clientY
-    const startPosX = terminalModalPos.x ?? (window.innerWidth - terminalModalSize.width) / 2
-    const startPosY = terminalModalPos.y ?? (window.innerHeight - terminalModalSize.height) / 2
-
-    const handleDragMove = (e) => {
-      const deltaX = e.clientX - startX
-      const deltaY = e.clientY - startY
-      setTerminalModalPos({
-        x: Math.max(0, Math.min(window.innerWidth - 100, startPosX + deltaX)),
-        y: Math.max(0, Math.min(window.innerHeight - 100, startPosY + deltaY))
-      })
-    }
-
-    const handleDragEnd = () => {
-      setIsDraggingTerminal(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleDragMove)
-      document.removeEventListener('mouseup', handleDragEnd)
-    }
-
-    document.addEventListener('mousemove', handleDragMove)
-    document.addEventListener('mouseup', handleDragEnd)
-  }, [terminalModalPos, terminalModalSize])
-
-  // Terminal modal resize handler (bottom-right corner)
-  const handleTerminalModalResizeStart = useCallback((e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsResizingTerminalModal(true)
-    document.body.style.cursor = 'se-resize'
-    document.body.style.userSelect = 'none'
-
-    const startX = e.clientX
-    const startY = e.clientY
-    const startWidth = terminalModalSize.width
-    const startHeight = terminalModalSize.height
-
-    const handleResizeMove = (e) => {
-      const deltaX = e.clientX - startX
-      const deltaY = e.clientY - startY
-      setTerminalModalSize({
-        width: Math.max(400, Math.min(window.innerWidth - 50, startWidth + deltaX)),
-        height: Math.max(300, Math.min(window.innerHeight - 50, startHeight + deltaY))
-      })
-    }
-
-    const handleResizeEnd = () => {
-      setIsResizingTerminalModal(false)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      document.removeEventListener('mousemove', handleResizeMove)
-      document.removeEventListener('mouseup', handleResizeEnd)
-    }
-
-    document.addEventListener('mousemove', handleResizeMove)
-    document.addEventListener('mouseup', handleResizeEnd)
-  }, [terminalModalSize])
-
-  // Check auth on mount - uses existing GitHub auth from github.js
-  useEffect(() => {
-    const checkAuth = async () => {
-      const user = getStoredUser()
-
-      if (!user) {
-        // Not logged in yet - let them proceed, they'll login via CodespaceSync
-        setAuthStatus('not_logged_in')
-        return
-      }
-
-      setAuthUser(user)
-
-      // Validate with backend
-      const result = await validateAccess(user.id, user.login)
-      if (result.valid) {
-        setAuthStatus('allowed')
-      } else if (result.reason === 'Could not connect to auth server') {
-        // Can't reach auth server - allow for now (offline mode)
-        setAuthStatus('allowed')
-      } else {
-        setAuthStatus('denied')
-      }
-    }
-
-    checkAuth()
-  }, [])
-
-  // Re-check auth when user logs in via CodespaceSync
-  const handleAuthChange = async (user) => {
-    if (!user) {
-      setAuthUser(null)
-      setAuthStatus('not_logged_in')
-      return
-    }
-
-    setAuthUser(user)
-    setAuthStatus('checking')
-
-    const result = await validateAccess(user.id, user.login)
-    if (result.valid) {
-      setAuthStatus('allowed')
-    } else if (result.reason === 'Could not connect to auth server') {
-      setAuthStatus('allowed')
-    } else {
-      setAuthStatus('denied')
-    }
-  }
 
   // Initialize script runner height to 1/4 of main content
   useEffect(() => {
@@ -789,109 +598,6 @@ function App() {
     }
   }
 
-  // Pull scripts from codespace
-  const handlePullScripts = async () => {
-    if (!syncConnection.syncUrl || !projectPath || isPulling) return
-    setIsPulling(true)
-    try {
-      const response = await fetch('/api/sync/pull', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          codespace_url: syncConnection.syncUrl,
-          last_sync: lastSyncRef.current
-        })
-      })
-      if (response.ok) {
-        const result = await response.json()
-        lastSyncRef.current = result.last_sync || {}
-      }
-      await handleRefresh()
-    } catch (err) {
-      console.error('Failed to pull scripts:', err)
-    } finally {
-      setIsPulling(false)
-    }
-  }
-
-  // Push scripts to codespace
-  const handlePushScripts = async () => {
-    if (!syncConnection.syncUrl || !projectPath || isPushing) return
-    setIsPushing(true)
-    try {
-      await fetch('/api/sync/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codespace_url: syncConnection.syncUrl })
-      })
-    } catch (err) {
-      console.error('Failed to push scripts:', err)
-    } finally {
-      setIsPushing(false)
-    }
-  }
-
-  // Load codespace files when tab is active and connected
-  const loadCodespaceFiles = useCallback(async (isInitialLoad = false) => {
-    if (!syncConnection.syncUrl || !syncConnection.isConnected) return
-
-    // Only show loading indicator on initial load to prevent tree collapse
-    if (isInitialLoad) {
-      setLoadingCodespaceFiles(true)
-    }
-    try {
-      const tree = await listAllFiles(syncConnection.syncUrl)
-      setCodespaceFiles(tree ? [tree] : [])
-    } catch (err) {
-      console.error('Failed to load codespace files:', err)
-      setCodespaceFiles([])
-    } finally {
-      if (isInitialLoad) {
-        setLoadingCodespaceFiles(false)
-      }
-    }
-  }, [syncConnection.syncUrl, syncConnection.isConnected])
-
-  // Reload codespace files when switching to codespace tab or when connected, with periodic polling
-  useEffect(() => {
-    if (activeTab !== 'codespace' || !syncConnection.isConnected) {
-      return
-    }
-
-    // Initial load (show loading indicator)
-    loadCodespaceFiles(true)
-
-    // Poll every 3 seconds while tab is active (silent refresh to preserve tree state)
-    const interval = setInterval(() => loadCodespaceFiles(false), 3000)
-
-    return () => clearInterval(interval)
-  }, [activeTab, syncConnection.isConnected, loadCodespaceFiles])
-
-  // Handle selecting a codespace file
-  const handleCodespaceFileSelect = async (file) => {
-    if (file.isDirectory) return
-
-    setSelectedFile({ name: file.name, path: `codespace://${file.path}`, isCodespace: true })
-    setLoading(true)
-
-    try {
-      const fileData = await getFile(syncConnection.syncUrl, file.path)
-      const fileType = getFileType(file.name)
-      const extension = getExtension(file.name)
-      setFileContent({
-        type: fileType,
-        content: fileData.content,
-        filename: file.name,
-        extension
-      })
-    } catch (err) {
-      console.error('Failed to read codespace file:', err)
-      setFileContent({ type: 'error', message: 'Failed to read file from codespace' })
-    } finally {
-      setLoading(false)
-    }
-  }
-
   // Helper to find a node by path in the tree
   const findNodeByPath = (nodes, targetPath) => {
     for (const node of nodes) {
@@ -954,24 +660,11 @@ function App() {
     }
   }
 
-  // Show login screen for checking/denied/error states
-  // Allow 'not_logged_in' to see the app (they'll login via CodespaceSync)
-  if (authStatus === 'checking' || authStatus === 'denied' || authStatus === 'error') {
-    return (
-      <LoginScreen
-        status={authStatus}
-        username={authUser?.login}
-      />
-    )
-  }
-
-  const activeResizeCursor = isResizing || isResizingTerminal
+  const activeResizeCursor = isResizing
     ? 'col-resize'
     : isResizingScriptRunner
       ? 'ns-resize'
-      : isResizingTerminalModal
-        ? 'se-resize'
-        : null
+      : null
 
   return (
     <div className={`app ${isResizing ? 'resizing' : ''}`}>
@@ -1071,21 +764,6 @@ function App() {
             >
               Gemini
             </button>
-            <button
-              className={`btn-flat ${terminalMode === 'virtual' ? 'active' : ''}`}
-              onClick={() => {
-                if (terminalMode === 'virtual') {
-                  setTerminalMode(null)
-                  setTerminalCollapsed(true)
-                } else {
-                  setTerminalMode('virtual')
-                  setTerminalCollapsed(false)
-                  setShowTerminal(true)
-                }
-              }}
-            >
-              Virtual Space
-            </button>
           </div>
         </div>
       )}
@@ -1093,58 +771,18 @@ function App() {
       {/* Main Content Area */}
       <div className="main-area">
         <div className={`sidebar ${isResizing ? 'resizing' : ''}`} style={{ width: sidebarWidth }}>
-          {/* Repository Tabs */}
-          {canWrite && tree.length > 0 && syncConnection.syncUrl && (
-            <div className="repo-tabs">
-              <button
-                className={`repo-tab ${activeTab === 'local' ? 'active' : ''}`}
-                onClick={() => setActiveTab('local')}
-              >
-                Local
-              </button>
-              <button
-                className={`repo-tab ${activeTab === 'codespace' ? 'active' : ''}`}
-                onClick={() => setActiveTab('codespace')}
-                disabled={!syncConnection.isConnected}
-              >
-                Codespace
-              </button>
-            </div>
-          )}
-
           <div className="file-tree-container">
             {tree.length > 0 ? (
-              activeTab === 'local' ? (
-                <FileTree
-                  tree={tree}
-                  onFileSelect={handleFileSelect}
-                  selectedPath={selectedFile?.path}
-                  onFilesModified={handleFilesModified}
-                  canWrite={canWrite}
-                  onRefresh={handleRefresh}
-                  suppressAnimationsRef={suppressAnimationsRef}
-                  isConnected={syncConnection.isConnected}
-                  projectPath={projectPath}
-                />
-              ) : (
-                <div className="codespace-file-list">
-                  {loadingCodespaceFiles && codespaceFiles.length === 0 ? (
-                    <div className="loading-files">Loading...</div>
-                  ) : codespaceFiles.length > 0 ? (
-                    <FileTree
-                      tree={codespaceFiles}
-                      onFileSelect={handleCodespaceFileSelect}
-                      selectedPath={selectedFile?.path}
-                      canWrite={false}
-                      suppressAnimationsRef={suppressAnimationsRef}
-                      controlledExpandedPaths={codespaceExpandedPaths}
-                      onExpandedPathsChange={setCodespaceExpandedPaths}
-                    />
-                  ) : (
-                    <div className="no-files">No files yet</div>
-                  )}
-                </div>
-              )
+              <FileTree
+                tree={tree}
+                onFileSelect={handleFileSelect}
+                selectedPath={selectedFile?.path}
+                onFilesModified={handleFilesModified}
+                canWrite={canWrite}
+                onRefresh={handleRefresh}
+                suppressAnimationsRef={suppressAnimationsRef}
+                projectPath={projectPath}
+              />
             ) : (
               <div className="tree-placeholder">
                 <button className="open-folder-btn" onClick={handleOpenFolder}>
@@ -1261,96 +899,10 @@ function App() {
                 folderName={folderName}
                 height={scriptRunnerHeight}
                 scriptChangeEvent={scriptChangeEvent}
-                lastTerminalActivity={lastTerminalActivity}
               />
             </>
           )}
         </div>
-
-        {/* Terminal Pane - Shows only for Virtual Space mode */}
-        {projectPath && terminalMode === 'virtual' && (
-          <>
-            <div
-              className="terminal-pane-resize-handle"
-              onPointerDown={handleTerminalResizeStart}
-            />
-            <div className="terminal-pane" style={{ width: terminalWidth }}>
-              {/* Terminal pane header with close button */}
-              <div className="terminal-pane-header">
-                <span className="terminal-pane-title">Virtual Space</span>
-                <button
-                  className="terminal-pane-collapse"
-                  onClick={() => {
-                    setTerminalMode(null)
-                    setTerminalCollapsed(true)
-                  }}
-                  title="Close terminal"
-                >
-                  ×
-                </button>
-              </div>
-
-              {/* Codespace controls - collapsible */}
-              <div className={`terminal-codespace-section ${codespaceCollapsed ? 'collapsed' : ''}`}>
-                <div className="codespace-header" onClick={() => setCodespaceCollapsed(!codespaceCollapsed)}>
-                  <span className="codespace-header-title">Codespace</span>
-                  <button
-                    className="codespace-toggle-btn"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setCodespaceCollapsed(!codespaceCollapsed)
-                    }}
-                  >
-                    {codespaceCollapsed ? '+' : '−'}
-                  </button>
-                </div>
-                <div className={`codespace-content ${codespaceCollapsed ? 'hidden' : ''}`}>
-                  <CodespaceSync
-                    projectPath={projectPath}
-                    currentConnection={syncConnection}
-                    minimized={codespaceCollapsed}
-                    onSyncComplete={() => {
-                      handleRefresh()
-                      if (activeTab === 'codespace') loadCodespaceFiles()
-                    }}
-                    onConnectionChange={(conn) => {
-                      setSyncConnection(conn)
-                    }}
-                    onLaunchClaude={() => {
-                      setShowTerminal(true)
-                    }}
-                    onAuthChange={handleAuthChange}
-                  />
-                </div>
-              </div>
-
-              <div className="terminal-pane-body">
-                {showTerminal && syncConnection.syncUrl ? (
-                  <Terminal
-                    syncUrl={syncConnection.syncUrl}
-                    isConnected={syncConnection.isConnected}
-                    autoLaunchClaude={true}
-                    onTerminalActivity={() => setLastTerminalActivity(Date.now())}
-                  />
-                ) : (
-                  <div className="terminal-launch-screen">
-                    {syncConnection.syncUrl && (
-                      <button
-                        className="btn-launch-claude"
-                        onClick={() => {
-                          setShowTerminal(true)
-                        }}
-                        disabled={!syncConnection.isConnected}
-                      >
-                        Launch Vibe Code
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
 
       </div>
 
@@ -1367,7 +919,6 @@ function App() {
                 <li>input_folder/</li>
                 <li>output_folder/</li>
                 <li>app_folder/ (scripts, meta_data)</li>
-                <li>codespace_bridge/</li>
               </ul>
               <p className="modal-note">Skip this if your project is already set up.</p>
             </div>
@@ -1426,21 +977,6 @@ function App() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Split Workspace - Preview + Terminal side by side */}
-      {showSplitWorkspace && (
-        <SplitWorkspace
-          projectPath={projectPath}
-          syncConnection={syncConnection}
-          onSyncConnectionChange={setSyncConnection}
-          onClose={() => setShowSplitWorkspace(false)}
-          onSyncComplete={() => {
-            handleRefresh()
-            if (activeTab === 'codespace') loadCodespaceFiles()
-          }}
-          onAuthChange={handleAuthChange}
-        />
       )}
 
       {/* Bottom Bar */}
