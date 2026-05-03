@@ -726,7 +726,7 @@ function App() {
               alignItems: 'center',
               gap: '14px',
             },
-            logoImage: { height: '128px', width: 'auto', filter: 'brightness(0) invert(1)' },
+            logoImage: { height: '104px', width: 'auto', filter: 'brightness(0) invert(1)' },
             header: {
               background: 'transparent',
               margin: '0 0 12px 0',

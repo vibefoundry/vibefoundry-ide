@@ -4196,8 +4196,8 @@ body {
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 18px !important;
-  padding: 64px 0 !important;
+  gap: 14px !important;
+  padding: 48px 0 !important;
   height: auto !important;
   min-height: 0 !important;
 }
