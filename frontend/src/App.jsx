@@ -679,7 +679,26 @@ function App() {
           <div className="signin-card">
             <h1 className="signin-title">VibeFoundry IDE</h1>
             <p className="signin-subtitle">Sign in to continue</p>
-            <SignIn routing="virtual" />
+            <SignIn
+              routing="virtual"
+              appearance={{
+                variables: {
+                  colorBackground: '#ffffff',
+                  colorText: '#0f172a',
+                  colorTextSecondary: '#475569',
+                  colorPrimary: '#0f172a',
+                  colorInputBackground: '#ffffff',
+                  colorInputText: '#0f172a',
+                  borderRadius: '8px',
+                },
+                elements: {
+                  rootBox: { width: '100%' },
+                  card: { boxShadow: 'none', border: '1px solid #e2e8f0' },
+                  footer: { display: 'none' },
+                  badge: { display: 'none' },
+                },
+              }}
+            />
           </div>
         </div>
       </SignedOut>
