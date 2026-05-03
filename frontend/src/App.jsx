@@ -12,6 +12,7 @@ import './App.css'
 
 function App() {
   const { getToken } = useAuth()
+  const [skipAuth, setSkipAuth] = useState(() => localStorage.getItem('vf_skip_auth') === '1')
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileContent, setFileContent] = useState(null)
@@ -672,37 +673,46 @@ function App() {
       ? 'ns-resize'
       : null
 
-  return (
-    <>
-      <SignedOut>
-        <div className="signin-screen">
-          <div className="signin-card">
-            <h1 className="signin-title">VibeFoundry IDE</h1>
-            <p className="signin-subtitle">Sign in to continue</p>
-            <SignIn
-              routing="virtual"
-              appearance={{
-                variables: {
-                  colorBackground: '#ffffff',
-                  colorText: '#0f172a',
-                  colorTextSecondary: '#475569',
-                  colorPrimary: '#0f172a',
-                  colorInputBackground: '#ffffff',
-                  colorInputText: '#0f172a',
-                  borderRadius: '8px',
-                },
-                elements: {
-                  rootBox: { width: '100%' },
-                  card: { boxShadow: 'none', border: '1px solid #e2e8f0' },
-                  footer: { display: 'none' },
-                  badge: { display: 'none' },
-                },
-              }}
-            />
-          </div>
-        </div>
-      </SignedOut>
-      <SignedIn>
+  const renderSignInGate = () => (
+    <div className="signin-screen">
+      <img src="/vf_logo.png" alt="VibeFoundry" className="signin-logo" />
+      <SignIn
+        routing="virtual"
+        appearance={{
+          variables: {
+            colorBackground: '#ffffff',
+            colorText: '#0f172a',
+            colorTextSecondary: '#475569',
+            colorPrimary: '#0f172a',
+            colorInputBackground: '#ffffff',
+            colorInputText: '#0f172a',
+            borderRadius: '8px',
+          },
+          elements: {
+            rootBox: { width: '380px' },
+            card: {
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+              border: '1px solid #e2e8f0',
+            },
+            footer: { display: 'none' },
+            badge: { display: 'none' },
+          },
+        }}
+      />
+      <button
+        className="signin-skip"
+        onClick={() => {
+          localStorage.setItem('vf_skip_auth', '1')
+          setSkipAuth(true)
+        }}
+      >
+        Continue without signing in →
+      </button>
+      <p className="signin-skip-note">Free version. Some templates and features will be limited.</p>
+    </div>
+  )
+
+  const ideContent = (
     <div className={`app ${isResizing ? 'resizing' : ''}`}>
       {activeResizeCursor && (
         <div className="resize-capture-overlay" style={{ cursor: activeResizeCursor }} />
@@ -1023,7 +1033,14 @@ function App() {
       )}
 
     </div>
-      </SignedIn>
+  )
+
+  if (skipAuth) return ideContent
+
+  return (
+    <>
+      <SignedOut>{renderSignInGate()}</SignedOut>
+      <SignedIn>{ideContent}</SignedIn>
     </>
   )
 }

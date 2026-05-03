@@ -4131,43 +4131,48 @@ body {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f8fafc;
-  z-index: 1000;
-}
-
-.signin-card {
-  display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 40px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-  min-width: 360px;
+  justify-content: center;
+  gap: 24px;
+  background: #f8fafc;
+  z-index: 1000;
+  padding: 24px;
 }
 
-.signin-title {
-  font-size: 28px;
-  font-weight: 600;
-  color: #0f172a;
-  margin: 0;
+.signin-logo {
+  height: 64px;
+  width: auto;
+  user-select: none;
 }
 
-.signin-subtitle {
-  font-size: 14px;
+.signin-skip {
+  background: transparent;
+  border: none;
   color: #475569;
-  margin: 0 0 8px 0;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.signin-skip:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+.signin-skip-note {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0;
 }
 
 /* Belt-and-suspenders: hide Clerk's development-mode footer + branding badge
    even if a future SDK rev moves them out of the elements selectors above. */
-.signin-card .cl-footer,
-.signin-card .cl-badge,
-.signin-card [class*="developmentMode"],
-.signin-card [data-localization-key*="development"] {
+.signin-screen .cl-footer,
+.signin-screen .cl-badge,
+.signin-screen [class*="developmentMode"],
+.signin-screen [data-localization-key*="development"] {
   display: none !important;
 }
