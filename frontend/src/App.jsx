@@ -714,15 +714,11 @@ function App() {
               padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },
-            // Banner = just the logo box, bled to card edges with blue + grid.
-            // Sized large for visual weight.
+            // Banner = just the logo box, bled to card edges. Translucent
+            // blue so the single page-background grid shows through —
+            // there is no independent grid on the banner or the card body.
             logoBox: {
-              background: '#2563eb',
-              backgroundImage: `
-                linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.16) 1px, transparent 1px)
-              `,
-              backgroundSize: '32px 32px',
+              background: 'rgba(37, 99, 235, 0.78)',
               margin: '0 -28px 16px -28px',
               padding: '56px 0',
               flexDirection: 'column',
