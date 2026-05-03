@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { SignedIn, SignedOut, SignIn, useAuth } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, SignIn, useAuth, useUser, useClerk } from '@clerk/clerk-react'
 import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
@@ -12,7 +12,17 @@ import './App.css'
 
 function App() {
   const { getToken } = useAuth()
+  const { isSignedIn } = useUser()
+  const { signOut } = useClerk()
   const [skipAuth, setSkipAuth] = useState(() => localStorage.getItem('vf_skip_auth') === '1')
+
+  const handleAuthToggle = async () => {
+    if (isSignedIn) {
+      await signOut()
+    }
+    localStorage.removeItem('vf_skip_auth')
+    setSkipAuth(false)
+  }
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileContent, setFileContent] = useState(null)
@@ -814,6 +824,9 @@ function App() {
               }}
             >
               Gemini
+            </button>
+            <button className="btn-flat btn-auth" onClick={handleAuthToggle}>
+              {isSignedIn ? 'Sign out' : 'Sign in'}
             </button>
           </div>
         </div>
