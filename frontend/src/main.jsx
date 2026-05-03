@@ -8,7 +8,8 @@ const PUBLISHABLE_KEY = 'pk_test_cmFwaWQtcHl0aG9uLTQyLmNsZXJrLmFjY291bnRzLmRldiQ
 const localization = {
   signIn: {
     start: {
-      subtitle: 'Please sign in to continue',
+      title: 'Sign In For VibeFoundry Premium',
+      subtitle: '',
     },
   },
 }

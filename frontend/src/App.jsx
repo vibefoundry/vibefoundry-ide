@@ -709,17 +709,9 @@ function App() {
               padding: '0 32px 32px 32px',
               overflow: 'hidden',
             },
-            // Logo and header share the same blue background so they read as
-            // one continuous banner. Grid pattern lives only on the header to
-            // avoid the visible seam where two background-positions meet.
+            // Banner = just the logo box, bled to card edges with blue + grid.
+            // The title text below the banner is plain dark on white.
             logoBox: {
-              background: '#2563eb',
-              margin: '0 -32px 0 -32px',
-              padding: '28px 0 8px 0',
-              justifyContent: 'center',
-            },
-            logoImage: { height: '48px', width: 'auto', filter: 'brightness(0) invert(1)' },
-            header: {
               background: '#2563eb',
               backgroundImage: `
                 linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
@@ -727,10 +719,18 @@ function App() {
               `,
               backgroundSize: '24px 24px',
               margin: '0 -32px 24px -32px',
-              padding: '0 24px 20px 24px',
+              padding: '32px 0',
+              justifyContent: 'center',
             },
-            headerTitle: { color: '#ffffff', fontSize: '20px' },
-            headerSubtitle: { color: 'rgba(255, 255, 255, 0.85)', fontSize: '13px' },
+            logoImage: { height: '48px', width: 'auto', filter: 'brightness(0) invert(1)' },
+            header: {
+              background: 'transparent',
+              margin: '0 0 20px 0',
+              padding: '0',
+              textAlign: 'center',
+            },
+            headerTitle: { color: '#0f172a', fontSize: '17px', fontWeight: '600' },
+            headerSubtitle: { display: 'none' },
             formFieldLabel: { display: 'none' },
             footer: { display: 'none' },
             badge: { display: 'none' },
