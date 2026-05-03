@@ -4213,3 +4213,20 @@ body {
   font-family: inherit;
   line-height: 1;
 }
+
+/* Continue button matches the banner exactly — same blue-800 base
+   and same translucence. Hover bumps opacity slightly for affordance. */
+.signin-screen .cl-formButtonPrimary {
+  background: rgba(30, 64, 175, 0.62) !important;
+  background-image: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+}
+.signin-screen .cl-formButtonPrimary:hover,
+.signin-screen .cl-formButtonPrimary:focus {
+  background: rgba(30, 64, 175, 0.78) !important;
+}
+.signin-screen .cl-formButtonPrimary:active {
+  background: rgba(30, 64, 175, 0.85) !important;
+}
