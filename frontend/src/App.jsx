@@ -739,7 +739,11 @@ function App() {
             formField: { margin: '0' },
             formFieldLabel: { display: 'none' },
             formButtonPrimary: { marginTop: '4px' },
-            footer: { display: 'none' },
+            // Keep the footer visible so the "Don't have an account?
+            // Sign up" link renders, but hide the Clerk branding badge
+            // and the dev-mode warning that also live in the footer.
+            footer: { background: 'transparent' },
+            footerAction: { background: 'transparent' },
             badge: { display: 'none' },
           },
         }}
