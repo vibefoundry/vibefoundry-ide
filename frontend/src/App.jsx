@@ -675,10 +675,13 @@ function App() {
 
   const renderSignInGate = () => (
     <div className="signin-screen">
-      <img src="/vf_logo.png" alt="VibeFoundry" className="signin-logo" />
       <SignIn
         routing="virtual"
         appearance={{
+          layout: {
+            logoImageUrl: '/vf_logo.png',
+            logoPlacement: 'inside',
+          },
           variables: {
             colorBackground: '#ffffff',
             colorText: '#0f172a',
@@ -694,6 +697,8 @@ function App() {
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
               border: '1px solid #e2e8f0',
             },
+            logoImage: { height: '48px', width: 'auto' },
+            formFieldLabel: { display: 'none' },
             footer: { display: 'none' },
             badge: { display: 'none' },
           },

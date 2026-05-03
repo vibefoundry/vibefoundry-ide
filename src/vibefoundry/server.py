@@ -2282,6 +2282,15 @@ async def serve_service_worker():
     return JSONResponse(status_code=404, content={"error": "sw.js not found"})
 
 
+@app.get("/vf_logo.png")
+async def serve_vf_logo():
+    static_dir = get_static_dir()
+    path = static_dir / "vf_logo.png"
+    if path.exists():
+        return FileResponse(path, media_type="image/png")
+    return JSONResponse(status_code=404, content={"error": "vf_logo.png not found"})
+
+
 # Mount static files for assets (at module load time)
 _static_dir = get_static_dir()
 _assets_dir = _static_dir / "assets"
