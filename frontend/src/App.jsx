@@ -693,9 +693,9 @@ function App() {
             logoPlacement: 'inside',
           },
           variables: {
-            colorBackground: '#ffffff',
+            colorBackground: '#dbeafe',
             colorText: '#0f172a',
-            colorTextSecondary: '#475569',
+            colorTextSecondary: '#1e3a8a',
             colorPrimary: '#2563eb',
             colorInputBackground: '#ffffff',
             colorInputText: '#0f172a',
@@ -704,8 +704,9 @@ function App() {
           elements: {
             rootBox: { width: '380px' },
             card: {
-              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
-              border: '1px solid #e2e8f0',
+              background: '#dbeafe',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+              border: '1px solid #93c5fd',
               padding: '0 32px 32px 32px',
               overflow: 'hidden',
             },
