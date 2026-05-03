@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { SignedIn, SignedOut, SignIn, useAuth } from '@clerk/clerk-react'
 import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
@@ -10,6 +11,7 @@ import {
 import './App.css'
 
 function App() {
+  const { getToken } = useAuth()
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileContent, setFileContent] = useState(null)
@@ -545,18 +547,22 @@ function App() {
     }
   }, [projectPath])
 
-  // Build project structure - creates folders and copies AGENTS.md
+  // Build project structure - creates folders and pulls templates via the proxy
   const handleBuildProject = async () => {
     if (!projectPath || !canWrite) return
 
     setIsScaffolding(true)
 
     try {
-      // Call the build endpoint to create folder structure
-      const res = await fetch('/api/build', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
+      // Grab the Clerk session JWT so the backend can authenticate against
+      // the templates proxy on vibefoundry.ai. If signed out, getToken()
+      // returns null — the backend falls back to the public template path.
+      const token = await getToken().catch(() => null)
+
+      const headers = { 'Content-Type': 'application/json' }
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
+      const res = await fetch('/api/build', { method: 'POST', headers })
       if (!res.ok) {
         throw new Error('Build failed')
       }
@@ -667,6 +673,17 @@ function App() {
       : null
 
   return (
+    <>
+      <SignedOut>
+        <div className="signin-screen">
+          <div className="signin-card">
+            <h1 className="signin-title">VibeFoundry IDE</h1>
+            <p className="signin-subtitle">Sign in to continue</p>
+            <SignIn routing="virtual" />
+          </div>
+        </div>
+      </SignedOut>
+      <SignedIn>
     <div className={`app ${isResizing ? 'resizing' : ''}`}>
       {activeResizeCursor && (
         <div className="resize-capture-overlay" style={{ cursor: activeResizeCursor }} />
@@ -987,6 +1004,8 @@ function App() {
       )}
 
     </div>
+      </SignedIn>
+    </>
   )
 }
 

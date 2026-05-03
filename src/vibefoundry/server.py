@@ -54,7 +54,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 import polars as pl
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -516,31 +516,62 @@ async def get_folder_info():
     }
 
 
+PROXY_BASE_URL = "https://vibefoundry.ai/api/templates"
+PUBLIC_TEMPLATE_FALLBACK_URL = "https://vibefoundry.ai/templates"
+
+
+async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
+    """Fetch templates/ from the private proxy using a Clerk JWT and write
+    them into dest_root. Returns the list of filenames written. Raises on
+    proxy errors so the caller can decide whether to fall back."""
+    headers = {"Authorization": f"Bearer {jwt}"}
+    written: list[str] = []
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        listing_res = await client.get(PROXY_BASE_URL, headers=headers)
+        listing_res.raise_for_status()
+        entries = listing_res.json()
+        for entry in entries:
+            if entry.get("type") != "file":
+                continue
+            name = entry["name"]
+            file_res = await client.get(f"{PROXY_BASE_URL}/{name}", headers=headers)
+            file_res.raise_for_status()
+            (dest_root / name).write_bytes(file_res.content)
+            written.append(name)
+    return written
+
+
 @app.post("/api/build")
-async def build_project():
-    """Build the project structure - creates folders and copies instruction files"""
+async def build_project(request: Request):
+    """Build the project structure - creates folders and pulls templates."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
     # Create folder structure
     folders = setup_project_structure(state.project_folder)
 
-    import shutil
-    import urllib.request
-    templates_dir = Path(__file__).parent / "templates"
-    TEMPLATE_BASE_URL = "https://vibefoundry.ai/templates"
+    # Pull templates: try the authenticated proxy first if we have a JWT,
+    # then fall back to the public website cascade for unauthenticated users.
+    auth_header = request.headers.get("authorization", "")
+    jwt = auth_header.split(" ", 1)[1].strip() if auth_header.lower().startswith("bearer ") else ""
+    templates_written: list[str] = []
 
-    for filename in ("AGENTS.md",):
-        dest = state.project_folder / filename
-        # Try downloading the latest version from the website
+    if jwt:
         try:
-            url = f"{TEMPLATE_BASE_URL}/{filename}"
-            urllib.request.urlretrieve(url, str(dest))
-        except Exception:
-            # Fallback to bundled copy
-            bundled = templates_dir / filename
-            if bundled.exists():
-                shutil.copy2(bundled, dest)
+            templates_written = await _cascade_templates_via_proxy(state.project_folder, jwt)
+        except Exception as e:
+            print(f"[Build] Proxy cascade failed ({e}); falling back to public path")
+
+    if not templates_written:
+        # Public fallback — single canonical AGENTS.md served as a static file.
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/AGENTS.md")
+                if res.status_code == 200:
+                    (state.project_folder / "AGENTS.md").write_bytes(res.content)
+                    templates_written = ["AGENTS.md"]
+        except Exception as e:
+            print(f"[Build] Public fallback also failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
