@@ -704,13 +704,13 @@ function App() {
           elements: {
             rootBox: { width: '380px' },
             card: {
-              // Translucent baby blue so the page background grid shows
-              // through the card body directly — same grid pattern, no
-              // duplication, no seam.
-              background: 'rgba(191, 219, 254, 0.45)',
-              backdropFilter: 'blur(2px)',
-              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
-              border: '1px solid #93c5fd',
+              // Heavily translucent so the page-background grid reads
+              // straight through the card body — only the banner above
+              // is opaque blue.
+              background: 'rgba(219, 234, 254, 0.22)',
+              backdropFilter: 'blur(1px)',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
+              border: '1px solid rgba(147, 197, 253, 0.6)',
               padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },

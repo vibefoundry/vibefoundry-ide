@@ -4135,10 +4135,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 24px;
-  background-color: #eff6ff;
+  background-color: #ffffff;
   background-image:
-    linear-gradient(rgba(37, 99, 235, 0.14) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(37, 99, 235, 0.14) 1px, transparent 1px);
+    linear-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.05) 1px, transparent 1px);
   background-size: 32px 32px;
   z-index: 1000;
   padding: 24px;
@@ -4187,15 +4187,28 @@ body {
   display: none !important;
 }
 
-/* Add "VibeFoundry IDE" text below the logo inside the banner via a
-   pseudo-element. Clerk's logoBox renders only the image; this stacks
-   the text under it. The flexDirection: column in the appearance prop
-   above is what makes them stack vertically. */
+/* Force the logoBox into a flex column. Clerk's default styles win
+   over inline appearance props, so we override here with !important
+   to make sure the logo + the "VibeFoundry IDE" pseudo-element below
+   stack vertically inside the blue banner. */
+.signin-screen .cl-logoBox {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 18px !important;
+  padding: 64px 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* "VibeFoundry IDE" text directly under the logo inside the banner. */
 .signin-screen .cl-logoBox::after {
   content: 'VibeFoundry IDE';
   color: rgba(255, 255, 255, 0.95);
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.01em;
   font-family: inherit;
+  line-height: 1;
 }
