@@ -5,8 +5,16 @@ import App from './App.jsx'
 
 const PUBLISHABLE_KEY = 'pk_test_cmFwaWQtcHl0aG9uLTQyLmNsZXJrLmFjY291bnRzLmRldiQ'
 
+const localization = {
+  signIn: {
+    start: {
+      subtitle: 'Please sign in to continue',
+    },
+  },
+}
+
 createRoot(document.getElementById('root')).render(
-  <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+  <ClerkProvider publishableKey={PUBLISHABLE_KEY} localization={localization}>
     <App />
   </ClerkProvider>
 )

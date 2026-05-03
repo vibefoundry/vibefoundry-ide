@@ -4176,3 +4176,18 @@ body {
 .signin-screen [data-localization-key*="development"] {
   display: none !important;
 }
+
+/* Force the sign-in subtitle text to "Please sign in to continue" if the
+   localization prop didn't take effect (Clerk's localization keys vary
+   slightly between SDK versions). This hides the original text and
+   substitutes ours, keeping styling and layout intact. */
+.signin-screen .cl-headerSubtitle {
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+.signin-screen .cl-headerSubtitle::before {
+  content: 'Please sign in to continue';
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.85);
+}

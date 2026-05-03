@@ -687,11 +687,6 @@ function App() {
     <div className="signin-screen">
       <SignIn
         routing="virtual"
-        localization={{
-          signIn: {
-            start: { subtitle: 'Please sign in to continue' },
-          },
-        }}
         appearance={{
           layout: {
             logoImageUrl: '/vf_logo.png',
@@ -714,27 +709,25 @@ function App() {
               padding: '0 32px 32px 32px',
               overflow: 'hidden',
             },
+            // Logo and header share the same blue background so they read as
+            // one continuous banner. Grid pattern lives only on the header to
+            // avoid the visible seam where two background-positions meet.
             logoBox: {
               background: '#2563eb',
-              backgroundImage: `
-                linear-gradient(rgba(255,255,255,0.18) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.18) 1px, transparent 1px)
-              `,
-              backgroundSize: '20px 20px',
               margin: '0 -32px 0 -32px',
-              padding: '24px 0 12px 0',
+              padding: '28px 0 8px 0',
               justifyContent: 'center',
             },
-            logoImage: { height: '48px', width: 'auto' },
+            logoImage: { height: '48px', width: 'auto', filter: 'brightness(0) invert(1)' },
             header: {
               background: '#2563eb',
               backgroundImage: `
-                linear-gradient(rgba(255,255,255,0.18) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.18) 1px, transparent 1px)
+                linear-gradient(rgba(255,255,255,0.16) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.16) 1px, transparent 1px)
               `,
-              backgroundSize: '20px 20px',
+              backgroundSize: '24px 24px',
               margin: '0 -32px 24px -32px',
-              padding: '4px 24px 24px 24px',
+              padding: '0 24px 20px 24px',
             },
             headerTitle: { color: '#ffffff', fontSize: '20px' },
             headerSubtitle: { color: 'rgba(255, 255, 255, 0.85)', fontSize: '13px' },
