@@ -693,10 +693,10 @@ function App() {
             logoPlacement: 'inside',
           },
           variables: {
-            colorBackground: '#ede9fe',
+            colorBackground: '#dbeafe',
             colorText: '#0f172a',
-            colorTextSecondary: '#5b21b6',
-            colorPrimary: '#7c3aed',
+            colorTextSecondary: '#1e3a8a',
+            colorPrimary: '#2563eb',
             colorInputBackground: '#ffffff',
             colorInputText: '#0f172a',
             borderRadius: '8px',
@@ -704,10 +704,10 @@ function App() {
           elements: {
             rootBox: { width: '380px' },
             card: {
-              background: 'rgba(237, 233, 254, 0.16)',
+              background: 'rgba(219, 234, 254, 0.16)',
               backdropFilter: 'blur(1px)',
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
-              border: '1px solid rgba(196, 181, 253, 0.5)',
+              border: '1px solid rgba(147, 197, 253, 0.5)',
               padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },
@@ -715,7 +715,7 @@ function App() {
             // light purple so the single page-background grid shows
             // through — no independent grid on the banner or card body.
             logoBox: {
-              background: 'rgba(76, 29, 149, 0.62)',
+              background: 'rgba(30, 64, 175, 0.62)',
               margin: '0 -28px 16px -28px',
               padding: '40px 0',
               flexDirection: 'column',
