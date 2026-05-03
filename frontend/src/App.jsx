@@ -693,10 +693,10 @@ function App() {
             logoPlacement: 'inside',
           },
           variables: {
-            colorBackground: '#dbeafe',
+            colorBackground: '#ede9fe',
             colorText: '#0f172a',
-            colorTextSecondary: '#1e3a8a',
-            colorPrimary: '#2563eb',
+            colorTextSecondary: '#5b21b6',
+            colorPrimary: '#a78bfa',
             colorInputBackground: '#ffffff',
             colorInputText: '#0f172a',
             borderRadius: '8px',
@@ -705,20 +705,20 @@ function App() {
             rootBox: { width: '380px' },
             card: {
               // Heavily translucent so the page-background grid reads
-              // straight through the card body — only the banner above
-              // is opaque blue.
-              background: 'rgba(219, 234, 254, 0.22)',
+              // straight through the card body. Light-purple tint to
+              // match the banner.
+              background: 'rgba(237, 233, 254, 0.30)',
               backdropFilter: 'blur(1px)',
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
-              border: '1px solid rgba(147, 197, 253, 0.6)',
+              border: '1px solid rgba(196, 181, 253, 0.6)',
               padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },
             // Banner = just the logo box, bled to card edges. Translucent
-            // blue so the single page-background grid shows through —
-            // there is no independent grid on the banner or the card body.
+            // light purple so the single page-background grid shows
+            // through — no independent grid on the banner or card body.
             logoBox: {
-              background: 'rgba(37, 99, 235, 0.78)',
+              background: 'rgba(167, 139, 250, 0.78)',
               margin: '0 -28px 16px -28px',
               padding: '56px 0',
               flexDirection: 'column',
