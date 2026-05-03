@@ -4197,14 +4197,14 @@ body {
   align-items: center !important;
   justify-content: center !important;
   gap: 14px !important;
-  padding: 48px 0 !important;
+  padding: 43px 0 !important;
   height: auto !important;
   min-height: 0 !important;
 }
 
-/* "VibeFoundry IDE" text directly under the logo inside the banner. */
+/* "VibeFoundry" text directly under the logo inside the banner. */
 .signin-screen .cl-logoBox::after {
-  content: 'VibeFoundry IDE';
+  content: 'VibeFoundry';
   color: rgba(255, 255, 255, 0.95);
   font-size: 24px;
   font-weight: 600;

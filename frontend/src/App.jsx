@@ -704,13 +704,10 @@ function App() {
           elements: {
             rootBox: { width: '380px' },
             card: {
-              // Heavily translucent so the page-background grid reads
-              // straight through the card body. Light-purple tint to
-              // match the banner.
-              background: 'rgba(237, 233, 254, 0.30)',
+              background: 'rgba(237, 233, 254, 0.24)',
               backdropFilter: 'blur(1px)',
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
-              border: '1px solid rgba(196, 181, 253, 0.6)',
+              border: '1px solid rgba(196, 181, 253, 0.55)',
               padding: '0 28px 24px 28px',
               overflow: 'hidden',
             },
@@ -718,15 +715,15 @@ function App() {
             // light purple so the single page-background grid shows
             // through — no independent grid on the banner or card body.
             logoBox: {
-              background: 'rgba(167, 139, 250, 0.78)',
+              background: 'rgba(167, 139, 250, 0.62)',
               margin: '0 -28px 16px -28px',
-              padding: '56px 0',
+              padding: '50px 0',
               flexDirection: 'column',
               justifyContent: 'center',
               alignItems: 'center',
               gap: '14px',
             },
-            logoImage: { height: '104px', width: 'auto', filter: 'brightness(0) invert(1)' },
+            logoImage: { height: '94px', width: 'auto', filter: 'brightness(0) invert(1)' },
             header: {
               background: 'transparent',
               margin: '0 0 12px 0',
