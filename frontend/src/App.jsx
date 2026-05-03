@@ -724,8 +724,11 @@ function App() {
               `,
               backgroundSize: '32px 32px',
               margin: '0 -28px 16px -28px',
-              padding: '72px 0',
+              padding: '56px 0',
+              flexDirection: 'column',
               justifyContent: 'center',
+              alignItems: 'center',
+              gap: '14px',
             },
             logoImage: { height: '128px', width: 'auto', filter: 'brightness(0) invert(1)' },
             header: {
