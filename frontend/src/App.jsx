@@ -687,6 +687,11 @@ function App() {
     <div className="signin-screen">
       <SignIn
         routing="virtual"
+        localization={{
+          signIn: {
+            start: { subtitle: 'Please sign in to continue' },
+          },
+        }}
         appearance={{
           layout: {
             logoImageUrl: '/vf_logo.png',
@@ -696,7 +701,7 @@ function App() {
             colorBackground: '#ffffff',
             colorText: '#0f172a',
             colorTextSecondary: '#475569',
-            colorPrimary: '#0f172a',
+            colorPrimary: '#2563eb',
             colorInputBackground: '#ffffff',
             colorInputText: '#0f172a',
             borderRadius: '8px',
@@ -706,8 +711,33 @@ function App() {
             card: {
               boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
               border: '1px solid #e2e8f0',
+              padding: '0 32px 32px 32px',
+              overflow: 'hidden',
+            },
+            logoBox: {
+              background: '#2563eb',
+              backgroundImage: `
+                linear-gradient(rgba(255,255,255,0.18) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.18) 1px, transparent 1px)
+              `,
+              backgroundSize: '20px 20px',
+              margin: '0 -32px 0 -32px',
+              padding: '24px 0 12px 0',
+              justifyContent: 'center',
             },
             logoImage: { height: '48px', width: 'auto' },
+            header: {
+              background: '#2563eb',
+              backgroundImage: `
+                linear-gradient(rgba(255,255,255,0.18) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.18) 1px, transparent 1px)
+              `,
+              backgroundSize: '20px 20px',
+              margin: '0 -32px 24px -32px',
+              padding: '4px 24px 24px 24px',
+            },
+            headerTitle: { color: '#ffffff', fontSize: '20px' },
+            headerSubtitle: { color: 'rgba(255, 255, 255, 0.85)', fontSize: '13px' },
             formFieldLabel: { display: 'none' },
             footer: { display: 'none' },
             badge: { display: 'none' },
