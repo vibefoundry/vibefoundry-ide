@@ -220,9 +220,11 @@ The copied template is a starting application, not a final result. Preserve the 
    ```
    The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed. **Never carry the template's `sample_data/` into the new task folder** — real tasks must source data exclusively from `input_folder/`. (See "Template data is for examples only" below.)
 
-3. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
+3. **Read the template's `CUSTOMIZE.md` first** (Track 2/3 templates only — at the template's root, e.g. `templates/geo_dashboard/CUSTOMIZE.md`). It's a tight numbered recipe — the 5 steps to take to customize the template, the ONE file you need to edit (`app_config.json`), and an explicit list of what NOT to touch. Following it cuts customization from minutes to ~30 seconds.
 
-4. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
+4. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
+
+5. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
 
 ### Template data is for examples only
 
