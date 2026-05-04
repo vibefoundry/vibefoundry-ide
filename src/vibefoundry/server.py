@@ -721,9 +721,9 @@ def _ensure_codex_trusted() -> None:
     "Trust workspace" in VS Code).
 
     Writes to ~/.codex/config.toml. Idempotent — only adds keys that
-    aren't already set, so it never overwrites a user's manual config.
-    Silent on failure — Build shouldn't fail just because we couldn't
-    nudge a third-party config file."""
+    aren't already set. Inserts the new keys ABOVE the first [section]
+    so they remain top-level (TOML's table-scope rules mean appending
+    at the end would slurp them into whatever the last [section] was)."""
     import re
     try:
         codex_dir = Path.home() / ".codex"
@@ -739,15 +739,28 @@ def _ensure_codex_trusted() -> None:
         if not to_add:
             return
 
-        if existing and not existing.endswith("\n"):
-            existing += "\n"
-        addition = (
-            "\n# Workspace trusted by VibeFoundry — auto-approves routine\n"
+        block = (
+            "# Workspace trusted by VibeFoundry — auto-approves routine\n"
             "# commands inside the project. See templates/setup_codex.sh\n"
             "# for the equivalent manual setup.\n"
             + "\n".join(to_add) + "\n"
         )
-        config_path.write_text(existing + addition, encoding="utf-8")
+
+        # Insert above the first [section] declaration so the new keys
+        # stay at the top level. If the file has no sections, the whole
+        # thing is top-level and we can safely append.
+        section_match = re.search(r"^\[", existing, re.MULTILINE)
+        if section_match:
+            idx = section_match.start()
+            head = existing[:idx].rstrip("\n")
+            tail = existing[idx:]
+            new_content = (head + "\n\n" if head else "") + block + "\n" + tail
+        else:
+            if existing and not existing.endswith("\n"):
+                existing += "\n"
+            new_content = existing + ("\n" if existing else "") + block
+
+        config_path.write_text(new_content, encoding="utf-8")
         print(f"[Build] Configured Codex workspace trust ({len(to_add)} keys added)")
     except Exception as e:
         print(f"[Build] Codex config nudge skipped: {e}")
