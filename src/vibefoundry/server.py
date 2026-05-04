@@ -717,13 +717,13 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
 
 @app.post("/api/build")
 async def build_project():
-    """Build the project structure - creates folders only.
+    """Build the project structure - creates folders + cascades AGENTS.md only.
 
-    Template cascade is intentionally disabled — Build no longer fetches
-    AGENTS.md or any of the app templates from the proxy. Users who want
-    templates should clone the templates repo manually for now. To re-enable
-    cascading, restore the call to _cascade_templates_via_proxy() and the
-    public-fallback AGENTS.md fetch below.
+    The full template tree (geo_dashboard, trend_analytics_dashboard,
+    data_pipeline, etc.) is intentionally NOT cascaded — only AGENTS.md
+    drops into the project root. To re-enable the full template cascade
+    later, swap the single-file fetch below for a call to
+    _cascade_templates_via_proxy().
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -731,6 +731,38 @@ async def build_project():
     # Create folder structure (input_folder/, output_folder/, app_folder/, etc.)
     folders = setup_project_structure(state.project_folder)
     templates_written: list[str] = []
+
+    # Fetch JUST AGENTS.md — try the authenticated proxy first, then fall
+    # back to the public website cascade for unauthenticated users.
+    stored = _read_stored_token()
+    jwt = stored["token"] if stored else ""
+    agents_dest = state.project_folder / "AGENTS.md"
+
+    if jwt:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(
+                    f"{PROXY_BASE_URL}/AGENTS.md",
+                    headers={
+                        "Authorization": f"Bearer {jwt}",
+                        "Accept": "application/vnd.github.raw",
+                    },
+                )
+                if res.status_code == 200:
+                    agents_dest.write_bytes(res.content)
+                    templates_written = ["AGENTS.md"]
+        except Exception as e:
+            print(f"[Build] Authenticated AGENTS.md fetch failed ({e}); falling back to public path")
+
+    if not templates_written:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/AGENTS.md")
+                if res.status_code == 200:
+                    agents_dest.write_bytes(res.content)
+                    templates_written = ["AGENTS.md"]
+        except Exception as e:
+            print(f"[Build] Public AGENTS.md fallback also failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
