@@ -45,7 +45,6 @@ project_folder/           <- You are here
 ├── output_folder/        <- Scripts save results here
 └── app_folder/
     ├── meta_data/        <- Metadata describing available data
-    ├── templates/        <- Reusable boilerplates (copy into scripts/, then refactor)
     └── scripts/          <- Every app lives here (one folder per app)
 ```
 
@@ -57,17 +56,21 @@ project_folder/           <- You are here
 - **Track 2 — PWA (DuckDB-WASM + React):** `app_folder/scripts/{app_name}/` contains the build script (`app.py`) **and** the PWA source files (`index.html`, `css/`, `js/`).
 - **Track 3 — Full-Stack (React + Python backend):** `app_folder/scripts/{app_name}/` contains `backend/`, `frontend/`, and the launcher scripts (`setup.sh`/`run_app.sh`/`clear_cache.sh` + `.bat` equivalents).
 
-**Never put app code at the top of `app_folder/`, at the project root, or anywhere outside `app_folder/scripts/`.** If you find yourself creating `app_folder/{app_name}/` or top-level `backend/` and `frontend/` folders, stop — move them under `app_folder/scripts/{app_name}/` instead. The only top-level folders allowed inside `app_folder/` are `scripts/`, `meta_data/`, and `templates/`.
+**Never put app code at the top of `app_folder/`, at the project root, or anywhere outside `app_folder/scripts/`.** If you find yourself creating `app_folder/{app_name}/` or top-level `backend/` and `frontend/` folders, stop — move them under `app_folder/scripts/{app_name}/` instead. The only top-level folders allowed inside `app_folder/` are `scripts/` and `meta_data/`.
 
-### Launcher scripts — Track 2 and Track 3 only
+### Every task folder MUST contain `run_app.sh` and `run_app.bat`
 
-| Track | Needs `run_app.sh` + `run_app.bat`? | Why |
-|---|---|---|
-| **Track 1 — Python pipeline** | **No.** Don't ship them. | `python app.py` is the canonical command; a launcher that just `cd`s and re-invokes the same line is redundant and clutters the task folder. Track 1 tasks also don't need a `README.md` — the `app.py` docstring + step docstrings are the documentation. |
-| **Track 2 — PWA** | **Yes**, both required. | `run_app.sh` runs `python build_app_package.py` to rebuild the output package, then launches the corresponding OS launcher inside `output_folder/{app_name}/` (`mac_start.sh` or `pc_start.bat`) so the developer sees the freshly built app immediately. |
-| **Track 3 — Full-Stack** | **Yes**, plus `setup.sh`/`.bat` and `clear_cache.sh`/`.bat`. | `run_app` reserves two free ports, then runs backend + frontend concurrently (see Track 3 launcher template below). |
+Every single `app_folder/scripts/{app_name}/` folder — regardless of track — must contain **both** `run_app.sh` (Mac/Linux) and `run_app.bat` (Windows). These are the canonical, one-command entry points the developer uses to run the app locally. **No exceptions.**
 
-For Track 2 and Track 3, both `.sh` files must be `chmod +x` by the build/setup process so they're executable. The `.bat` and `.sh` files always live alongside each other inside the task folder.
+What `run_app` does varies by track:
+
+| Track | What `run_app.sh` / `run_app.bat` does |
+|---|---|
+| **Track 1 — Python pipeline** | `cd` into the task folder and `python app.py` (the orchestrator that runs `step1_*.py`, `step2_*.py`, …) |
+| **Track 2 — PWA** | Runs `python build_app_package.py` to rebuild the output package, then launches the corresponding OS launcher inside `output_folder/{app_name}/` (`mac_start.sh` or `pc_start.bat`) so the developer sees the freshly built app immediately |
+| **Track 3 — Full-Stack** | Reserves two free ports, then runs the backend and frontend concurrently (see Track 3 launcher template below). Track 3 also gets `setup.sh`/`.bat` and `clear_cache.sh`/`.bat` for dependency management. |
+
+Both `.sh` files must be `chmod +x` by the build/setup process so they're executable. The `.bat` and `.sh` files always live alongside each other inside the task folder.
 
 ## Input Data Is Sacred — Never Edit It
 
@@ -76,32 +79,6 @@ For Track 2 and Track 3, both `.sh` files must be `chmod +x` by the build/setup 
 All transformations, merges, cleaning, filtering, deduplication, reformatting, and any other processing must produce **new files in `output_folder/`** — never edit the originals. If a script needs "cleaned" data, it reads from `input_folder/`, cleans it, and writes the result to `output_folder/`. The input stays pristine.
 
 This is a hard rule with no exceptions. Even if the user says "fix the data" or "clean the CSV," that means: read the input, transform it, and save the result as output. Never write back to `input_folder/`.
-
-## Templates
-
-Reusable boilerplates live in `app_folder/templates/{template_name}/`. They exist to be **copied into `app_folder/scripts/`, renamed, and refactored** for the specific task at hand — not to be edited in place.
-
-### How to use a template
-
-1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, copy it. Don't build from scratch when a template fits.
-2. **Copy → scripts/, then rename.** `cp -r app_folder/templates/{template_name} app_folder/scripts/{appropriate_new_name}`. The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed.
-3. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
-4. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
-
-### Template data is for examples only
-
-Templates ship synthetic `sample_data/` (and sometimes pre-staged files in `public/data/`) so they run out of the box. **Never use that data for any real analysis.** It's illustrative — the schemas are realistic, the values aren't.
-
-Real data always comes from:
-- `input_folder/` (read-only source data — see the "Input Data Is Sacred" rule above)
-- `output_folder/` (results from prior tasks)
-
-When a forked template's build script resolves its dataset, the priority order is always:
-1. `input_folder/{file}` — real data, wins
-2. Existing staged file in the task's local data folder — preserved if real
-3. `sample_data/` — fallback only, never overwrites real data
-
-If a forked task is being used in production, swap the sample dataset for the real one via `input_folder/` before shipping — never rely on the template's example values reaching downstream consumers.
 
 ---
 
@@ -337,14 +314,16 @@ RUN_FOLDER = os.environ.get("VF_RUN_FOLDER", TASK_OUTPUT)
 os.makedirs(RUN_FOLDER, exist_ok=True)
 
 # Input files (from users) are typically CSV — read with scan_csv.
-# All step outputs are parquet.
+# All step outputs are parquet. See "Polars Rules" below for the lazy +
+# streaming + column-pruned defaults this template follows.
 df = (
     pl.scan_csv(os.path.join(INPUT_FOLDER, "sales.csv"))
+      .select(["customer_id", "revenue"])  # column-prune early
       .group_by("customer_id")
       .agg(pl.col("revenue").sum().alias("total_revenue"))
       .sort("total_revenue", descending=True)
       .head(10)
-      .collect()
+      .collect(engine="streaming")
 )
 df.write_parquet(os.path.join(RUN_FOLDER, f"{SCRIPT_NAME}.parquet"))
 print(f"Output saved to {RUN_FOLDER}")
@@ -483,24 +462,114 @@ Step scripts work standalone because they use `os.environ.get("VF_RUN_FOLDER", T
 
 ## Polars Rules
 
-- Use `pl.scan_csv()` / `pl.scan_parquet()` for lazy loading — NOT `pl.read_csv()`
-- Chain lazy operations, call `.collect()` only at the end
-- Only fall back to Pandas if a specific library requires it
+The default mode of operation is **lazy + streaming + column-pruned**. This is
+not stylistic — it's a 5× RAM and 8× speed difference on a single join+groupby
+(measured on a 2-file ~1 GB workload: 3.9 GB → 0.8 GB peak, 2.2 s → 0.3 s).
+Treat eager mode as the exception, not the default.
 
-### Scaling beyond memory
+### The five rules — apply in order
 
-When inputs (or intermediate results) won't fit in RAM, the default `lf.collect(engine="streaming").write_parquet(path)` still materializes the final frame in Python before writing — which can freeze the machine on multi-GB outputs. Levers, in order of cost:
+1. **Read with `pl.scan_*`, never `pl.read_*`.**
+   `pl.scan_csv()` / `pl.scan_parquet()` build a query plan; `pl.read_*` loads
+   the whole file into RAM immediately. The only exception is files small enough
+   that you'd happily print them (lookup tables, tiny configs).
 
-- **`lf.sink_parquet(path)`** — replaces `collect(streaming).write_parquet(path)` for steps where output size scales with input. Same query plan, but the result never enters Python memory. Bounded RAM regardless of output size. Use this in any step doing scan → filter → write or scan → group-by → write where the output could be GB-scale. Caveat: not every query shape has a streaming-sink path yet (complex joins, certain pivots, some window functions still fall back to in-memory collect). Polars warns when that happens — watch for it.
-- **`POLARS_TEMP_DIR=/path/to/fast/ssd`** — env var that tells Polars where to spill sort and group-by intermediates if streaming can't bound them in RAM. Point at fast SSD, not network storage.
-- **Manual partition-loop chunking** — when a high-cardinality group-by still OOMs even with streaming, partition by the group key and process one chunk at a time inside a `for` loop, using `sink_parquet` per partition. Per-partition RAM is bounded by Polars' streaming chunk size, not the partition's row count. (See `data_pipeline/step4_partition_by_period.py` for the canonical pattern.)
-- **DuckDB instead of Polars** — for multi-100-GB joins or complex SQL on huge data, DuckDB's query engine has more mature disk-spilling on join-heavy workloads. Reads the same parquet files; consider it the escalation path when Polars streaming + spill aren't enough.
+2. **Column-prune immediately after every `scan_*`.**
+   `.select([only, columns, you, need])` is the cheapest RAM win available —
+   typically shrinks the dataset 3–10×. Especially before joins: a join's hash
+   table is sized by the right-hand columns it carries through.
 
-## Track 1 — No launcher scripts, no README
+3. **Filter early, before joins and group-bys.**
+   `.filter(...)` chained on the lazy frame pushes the predicate down to the
+   parquet reader so unmatched rows never enter RAM. Filtering after the join
+   wastes the join's work.
 
-Track 1 tasks **don't ship `run_app.sh` / `run_app.bat`** and **don't ship a `README.md`**. The canonical command is `python app.py` — a launcher that wraps that line is pure clutter. The `app.py` docstring plus the per-step docstrings are the documentation; if you need more context, write a clearer docstring rather than a sidecar README.
+4. **Call `.collect(engine="streaming")` — not bare `.collect()`.**
+   The streaming engine processes joins and group-bys in chunks instead of
+   materializing the full intermediate. This is the single biggest RAM lever.
+   Bare `.collect()` is fine only when the final result is the only large object.
 
-A Track 1 task folder is just: `app.py` + `step1_*.py` (+ `step2_*.py`, etc.) + an optional `sample_data/` for templates. Nothing else.
+5. **For multi-file workloads, prefer `pl.scan_parquet([list_of_paths])` over
+   `pl.concat([scan(...) for ...])`.** Polars treats a list of paths as one
+   logical dataset and can stream across files. If you must concat, do it lazily
+   and let streaming handle the rest.
+
+### What "efficient" looks like in practice
+
+```python
+outlets = (
+    pl.scan_parquet("Outlet Attributes.parquet")
+      .select(["OutletCode", "State"])  # rule 2
+)
+
+result = (
+    pl.scan_parquet([
+        "step1_aggregate_annual_FY25.parquet",
+        "step1_aggregate_annual_FY26.parquet",
+    ])  # rule 5
+    .filter(pl.col("Item_SellingVolumeLitres") > 0)  # rule 3
+    .join(outlets, on="OutletCode", how="left")
+    .group_by(["State", "PUConsumerBrandName"])
+    .agg(pl.col("Item_SellingVolumeLitres").sum().alias("vol"))
+    .sort("vol", descending=True)
+    .head(50)
+    .collect(engine="streaming")  # rule 4
+)
+```
+
+### What to avoid
+
+- `pl.read_parquet(big_file)` followed by transformations — loads everything,
+  defeats the optimizer.
+- Bare `.collect()` when the pipeline contains a join, group-by, sort, or pivot
+  on data larger than ~500 MB.
+- Calling `.collect()` mid-pipeline to inspect intermediate shape. Use
+  `.head(10).collect()` or `.collect_schema()` instead — neither materializes
+  the full frame.
+- `pandas` for anything except libraries that demand it. `pandas` is eager by
+  design and roughly 2× the RAM of equivalent Polars.
+
+### When eager mode is acceptable
+
+- The final step output is small (e.g., a top-N or a summary the next step
+  reads). The output of `.collect()` is a real `DataFrame` — that's expected.
+- The input file is genuinely tiny (< 50 MB on disk, < 200 MB in RAM).
+- Writing parquet: `df.write_parquet(...)` after a final collect is correct.
+
+### RAM budget — what fits where
+
+| Machine RAM | Comfortable working-set with streaming | Without streaming |
+|---|---|---|
+| 8 GB        | ~1.5 GB DataFrames in flight           | ~500 MB DataFrames |
+| 16 GB       | ~6 GB DataFrames in flight             | ~2 GB DataFrames   |
+| 32 GB       | ~16 GB DataFrames in flight            | ~6 GB DataFrames   |
+
+If a script's working-set exceeds the "without streaming" column, **streaming is
+mandatory, not optional**.
+
+- Only fall back to Pandas if a specific library requires it.
+
+## Track 1 Launcher Scripts (REQUIRED)
+
+Every Track 1 task folder must contain `run_app.sh` and `run_app.bat` alongside `app.py` and the step files. Both just `cd` into the task folder and run the orchestrator:
+
+**`run_app.sh`:**
+```bash
+#!/bin/bash
+# Run: bash app_folder/scripts/{task_name}/run_app.sh
+cd "$(dirname "$0")"
+python app.py
+```
+
+**`run_app.bat`:**
+```batch
+@echo off
+REM Run: app_folder\scripts\{task_name}\run_app.bat
+cd /d "%~dp0"
+python app.py
+```
+
+That's it for Track 1 — no `setup.sh`/`clear_cache.sh` needed since there are no Node deps. Both files must be `chmod +x` on Mac/Linux.
 
 ---
 
@@ -992,7 +1061,7 @@ raw = pl.scan_parquet("input_folder/sales.parquet")
 summary = (
     raw.group_by(["region", "month"])
     .agg(pl.col("revenue").sum(), pl.col("units").sum())
-    .collect()
+    .collect(engine="streaming")
 )
 summary.write_parquet("output_folder/app_name/data/sales_summary.parquet")
 
