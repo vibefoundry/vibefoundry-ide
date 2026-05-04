@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 # One-time Codex CLI setup for VibeFoundry projects (macOS / Linux).
 #
-# Marks the workspace as trusted so Codex can run shell commands and
-# edit files inside the project without prompting for approval on
-# every command. The agent still pauses for plans and judgment-call
-# questions — those are governed by AGENTS.md, not this config.
+# Marks the workspace as trusted so Codex auto-approves the routine
+# work that happens inside the project directory:
+#
+#   AUTO-APPROVED (anything within the workspace):
+#     - File exploration:   ls, find, Get-ChildItem, cat, grep, Select-String
+#     - File creation/edit: mkdir, touch, cp, mv, rm, New-Item, Copy-Item, Remove-Item
+#     - Python:             python script.py, PYTHONUTF8=1 python …,
+#                           PYTHONIOENCODING=utf-8 …, pip install, python -m venv
+#     - Git:                git add, git commit, git status, git diff, git log
+#     - Node/npm:           npm install, npm run build, npm run dev, node …
+#     - Data frame ops:     Polars, pandas, DuckDB — anything in-process
+#
+#   STILL REQUIRES APPROVAL (boundary cases):
+#     - Operations that leave the workspace directory (writes to ~/, /etc, etc.)
+#     - File transfers out of the project (scp, curl uploads, rsync to remote)
+#     - Plans for multi-step builds (agent-side, governed by AGENTS.md)
+#     - Judgment-call questions (e.g., "is this a new task or a continuation?")
+#
+# Equivalent to clicking "Trust workspace" in VS Code / Cursor / Codespaces.
 #
 # Run once:   bash app_folder/templates/setup_codex.sh
 # Re-run anytime — it's idempotent and backs up your existing config.

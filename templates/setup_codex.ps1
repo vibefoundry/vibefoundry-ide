@@ -1,9 +1,24 @@
 # One-time Codex CLI setup for VibeFoundry projects (Windows).
 #
-# Marks the workspace as trusted so Codex can run shell commands and
-# edit files inside the project without prompting for approval on
-# every command. The agent still pauses for plans and judgment-call
-# questions — those are governed by AGENTS.md, not this config.
+# Marks the workspace as trusted so Codex auto-approves the routine
+# work that happens inside the project directory:
+#
+#   AUTO-APPROVED (anything within the workspace):
+#     - File exploration:   Get-ChildItem, ls, cat, Get-Content, Select-String
+#     - File creation/edit: New-Item, mkdir, Copy-Item, Move-Item, Remove-Item
+#     - Python:             python script.py, PYTHONUTF8=1 python ...,
+#                           PYTHONIOENCODING=utf-8 ..., pip install, python -m venv
+#     - Git:                git add, git commit, git status, git diff, git log
+#     - Node/npm:           npm install, npm run build, npm run dev, node ...
+#     - Data frame ops:     Polars, pandas, DuckDB - anything in-process
+#
+#   STILL REQUIRES APPROVAL (boundary cases):
+#     - Operations that leave the workspace directory (writes to $HOME, etc.)
+#     - File transfers out of the project (Invoke-WebRequest uploads, scp, etc.)
+#     - Plans for multi-step builds (agent-side, governed by AGENTS.md)
+#     - Judgment-call questions
+#
+# Equivalent to clicking "Trust workspace" in VS Code / Cursor / Codespaces.
 #
 # Run once:   powershell -ExecutionPolicy Bypass -File app_folder\templates\setup_codex.ps1
 # Re-run anytime — it's idempotent and backs up your existing config.
