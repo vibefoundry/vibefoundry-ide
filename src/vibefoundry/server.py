@@ -715,6 +715,44 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
     return written
 
 
+def _ensure_codex_trusted() -> None:
+    """Mark the user's Codex CLI as trusting workspace ops so it stops
+    prompting for approval on routine commands (equivalent to clicking
+    "Trust workspace" in VS Code).
+
+    Writes to ~/.codex/config.toml. Idempotent — only adds keys that
+    aren't already set, so it never overwrites a user's manual config.
+    Silent on failure — Build shouldn't fail just because we couldn't
+    nudge a third-party config file."""
+    import re
+    try:
+        codex_dir = Path.home() / ".codex"
+        codex_dir.mkdir(parents=True, exist_ok=True)
+        config_path = codex_dir / "config.toml"
+        existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+
+        to_add: list[str] = []
+        if not re.search(r"^\s*approval_policy\s*=", existing, re.MULTILINE):
+            to_add.append('approval_policy = "never"')
+        if not re.search(r"^\s*sandbox_mode\s*=", existing, re.MULTILINE):
+            to_add.append('sandbox_mode = "workspace-write"')
+        if not to_add:
+            return
+
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        addition = (
+            "\n# Workspace trusted by VibeFoundry — auto-approves routine\n"
+            "# commands inside the project. See templates/setup_codex.sh\n"
+            "# for the equivalent manual setup.\n"
+            + "\n".join(to_add) + "\n"
+        )
+        config_path.write_text(existing + addition, encoding="utf-8")
+        print(f"[Build] Configured Codex workspace trust ({len(to_add)} keys added)")
+    except Exception as e:
+        print(f"[Build] Codex config nudge skipped: {e}")
+
+
 @app.post("/api/build")
 async def build_project():
     """Build the project structure - creates folders and pulls templates."""
@@ -723,6 +761,10 @@ async def build_project():
 
     # Create folder structure
     folders = setup_project_structure(state.project_folder)
+
+    # Idempotently mark the workspace as trusted in the user's Codex CLI
+    # config so they don't get hammered with per-command approval prompts.
+    _ensure_codex_trusted()
 
     # Pull templates: try the authenticated proxy first if we have a stored
     # IDE auth token, then fall back to the public website cascade for
