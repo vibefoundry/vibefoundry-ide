@@ -136,6 +136,20 @@ When the user's request is ambiguous (e.g., "build me a dashboard"), ask: *"Is t
 
 Once the track is chosen, only the sections for that track apply. Don't mix patterns across tracks (e.g., don't use Track 1's `app.py` + step naming for Track 3's backend, and don't create Track 3 launcher scripts for a Track 1 task).
 
+### After you pick a track — read the template's CUSTOMIZE.md FIRST
+
+If you've picked **Track 2 or Track 3** and there's a matching template under `app_folder/templates/`, your **very first read** is that template's `CUSTOMIZE.md` at the template root. Examples:
+
+- `app_folder/templates/geo_dashboard/CUSTOMIZE.md`
+- `app_folder/templates/trend_analytics_dashboard/CUSTOMIZE.md`
+- (and any Track 3 templates that ship one)
+
+`CUSTOMIZE.md` is a 5-step recipe — what to copy, the ONE file you need to edit, and an explicit list of what NOT to touch. Following it cuts customization from minutes to ~30 seconds.
+
+**Do not** open `app.js`, the `prepare_dev_assets.py`, the `vite.config.js`, or any other file in the template before reading `CUSTOMIZE.md`. The recipe will tell you which (usually only `app_config.json`) actually needs editing.
+
+For **Track 1**, there's no fork and no `CUSTOMIZE.md` — read the template's `app.py` for pattern reference, then write the new task from scratch (per the "How to use a template" section below).
+
 ## Folder Structure
 
 ```
