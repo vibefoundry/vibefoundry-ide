@@ -8,6 +8,12 @@ app_core/dist/
 
 # UMD libs downloaded by prepare_dev_assets.py.
 app_core/src_app/lib/
+# Exception: the DuckDB-WASM IIFE bundle is pre-built (DuckDB-WASM
+# itself doesn't ship UMD/IIFE on unpkg, only ESM/CJS). Regen via:
+#   echo "import * as d from '@duckdb/duckdb-wasm'; window.duckdb = d;" \
+#     | npx esbuild --bundle --format=iife --target=es2020 \
+#     > duckdb-bundle.js
+!app_core/src_app/lib/duckdb-bundle.js
 
 # Staged dataset — sourced from input_folder/ or sample_data/ at run time.
 app_core/src_app/data/*.parquet

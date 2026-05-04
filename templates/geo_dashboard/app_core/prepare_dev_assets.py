@@ -27,16 +27,16 @@ CONFIG_PATH = os.path.join(APP_DATA_DIR, "app_config.json")
 MANIFEST_PATH = os.path.join(APP_DATA_DIR, "manifest.json")
 
 # UMD / IIFE asset URLs. Pinned versions for reproducibility.
+# Note: duckdb-bundle.js is NOT here — DuckDB-WASM doesn't publish a
+# UMD/IIFE build on unpkg (only ESM/CJS). We ship a pre-built IIFE
+# wrapper as a committed file at lib/duckdb-bundle.js. The .wasm and
+# worker files below ARE on unpkg and downloaded on first run.
 ASSETS = [
     ("react.min.js",                "https://unpkg.com/react@18.3.1/umd/react.production.min.js"),
     ("react-dom.min.js",            "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"),
     ("leaflet.js",                  "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"),
     ("leaflet.css",                 "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"),
     ("supercluster.min.js",         "https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"),
-    # @duckdb/duckdb-wasm ships an IIFE/global build of the EH variant
-    # alongside its WASM blob and worker. The browser loads them via
-    # `<script>` and `new Worker(…)` — no bundler involved.
-    ("duckdb-bundle.js",            "https://unpkg.com/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser-eh.js"),
     ("duckdb-browser-eh.worker.js", "https://unpkg.com/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser-eh.worker.js"),
     ("duckdb-eh.wasm",              "https://unpkg.com/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-eh.wasm"),
 ]

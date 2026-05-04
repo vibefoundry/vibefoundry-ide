@@ -90,9 +90,7 @@ try {
     $rel = $ctx.Request.Url.AbsolutePath.TrimStart('/')
     if ([string]::IsNullOrEmpty($rel)) { $rel = "index.html" }
     $file = Join-Path $root $rel
-    # Headers needed for DuckDB-WASM SharedArrayBuffer
-    $ctx.Response.Headers.Add("Cross-Origin-Opener-Policy", "same-origin")
-    $ctx.Response.Headers.Add("Cross-Origin-Embedder-Policy", "require-corp")
+    # No COOP/COEP — would block OSM tile loading. DuckDB-WASM EH variant doesn't need it.
     $ctx.Response.Headers.Add("Cache-Control", "no-store")
     if (Test-Path $file -PathType Leaf) {
       $ext = [System.IO.Path]::GetExtension($file).ToLower()
@@ -163,8 +161,6 @@ class H(http.server.SimpleHTTPRequestHandler):
         ".geojson": "application/json",
     }
     def end_headers(self):
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
     def log_message(self, *a, **k): pass

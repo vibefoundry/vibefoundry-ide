@@ -39,9 +39,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     }
 
     def end_headers(self):
-        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
-        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
-        # Aggressive no-cache so refresh always picks up edits
+        # Deliberately NOT sending COOP/COEP `require-corp` — the DuckDB-WASM
+        # EH variant we ship is single-threaded and doesn't need
+        # SharedArrayBuffer. `require-corp` would block OpenStreetMap tile
+        # loading (OSM tile servers don't ship CORP headers), producing a
+        # grey map. If you switch to DuckDB's COI (threaded) variant later,
+        # add the COOP/COEP headers back AND host map tiles from a CORP-friendly
+        # provider (or proxy them through this server).
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
