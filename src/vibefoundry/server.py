@@ -717,47 +717,20 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
 
 @app.post("/api/build")
 async def build_project():
-    """Build the project structure - creates folders and pulls templates."""
+    """Build the project structure - creates folders only.
+
+    Template cascade is intentionally disabled — Build no longer fetches
+    AGENTS.md or any of the app templates from the proxy. Users who want
+    templates should clone the templates repo manually for now. To re-enable
+    cascading, restore the call to _cascade_templates_via_proxy() and the
+    public-fallback AGENTS.md fetch below.
+    """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
-    # Create folder structure
+    # Create folder structure (input_folder/, output_folder/, app_folder/, etc.)
     folders = setup_project_structure(state.project_folder)
-
-    # Pull templates: try the authenticated proxy first if we have a stored
-    # IDE auth token, then fall back to the public website cascade for
-    # unauthenticated users.
-    stored = _read_stored_token()
-    jwt = stored["token"] if stored else ""
     templates_written: list[str] = []
-
-    # Templates land inside app_folder/templates/ — keeps starter content
-    # separate from any scripts the user writes themselves under app_folder/.
-    # The exception is AGENTS.md which Claude expects at the project root,
-    # so we hoist it there after the cascade.
-    templates_root = state.project_folder / "app_folder" / "templates"
-    templates_root.mkdir(parents=True, exist_ok=True)
-
-    if jwt:
-        try:
-            templates_written = await _cascade_templates_via_proxy(templates_root, jwt)
-            # Hoist AGENTS.md from app_folder/templates/ → project root.
-            agents_in_templates = templates_root / "AGENTS.md"
-            if agents_in_templates.exists():
-                agents_in_templates.replace(state.project_folder / "AGENTS.md")
-        except Exception as e:
-            print(f"[Build] Proxy cascade failed ({e}); falling back to public path")
-
-    if not templates_written:
-        # Public fallback — single canonical AGENTS.md served as a static file.
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/AGENTS.md")
-                if res.status_code == 200:
-                    (state.project_folder / "AGENTS.md").write_bytes(res.content)
-                    templates_written = ["AGENTS.md"]
-        except Exception as e:
-            print(f"[Build] Public fallback also failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
