@@ -48,6 +48,28 @@ These files are auto-generated and kept fresh by the IDE every time data changes
 
 If you find yourself about to scan a file you've already inspected this session — stop. You already know what's in it.
 
+## Build fast — write everything, run once
+
+When building a multi-file pipeline or app, **don't run the code after every edit**. The right loop is:
+
+1. **Read the cached metadata** (`app_folder/meta_data/*.txt`) so you know the schema
+2. **Write all the steps / files at once**, end-to-end
+3. **Run the whole thing once at the end**
+
+**What you must not do:**
+- ❌ Write `step1.py`, run it, look at output, write `step2.py`, run pipeline, look, write `step3.py`, run pipeline...
+- ❌ Edit one step, then re-run the entire pipeline to "make sure it still works"
+- ❌ Run each new file as soon as you write it just to confirm it executes
+- ❌ Open a file you just wrote to verify the contents
+
+**What you should do:**
+- ✅ Sketch all the steps mentally based on the metadata
+- ✅ Write `step1.py`, `step2.py`, `step3.py`, `app.py` in one go without running anything
+- ✅ Run `python app.py` exactly once when everything is written
+- ✅ If the run fails, fix the specific error and run again — don't iteratively re-run earlier steps
+
+Each "run-and-check" cycle in the middle of building wastes seconds-to-minutes of the user's time per cycle. Multiply by N steps and you've turned a 30-second task into 5 minutes. **Plan, write, run once — that's the build loop.**
+
 ## Shell commands — match the host OS
 
 **Detect the host OS before running shell commands and use the native syntax for that platform.** Users may be on macOS, Linux, or Windows. Quick check: `uname -s` returns `Darwin` (macOS) or `Linux`, and fails on Windows PowerShell — `$IsWindows` returns `True` in PowerShell.
