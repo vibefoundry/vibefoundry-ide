@@ -15,7 +15,20 @@ This is a VibeFoundry IDE workspace. The user has explicitly trusted it. **Don't
 
 **Still pause and ask** for: anything that leaves the workspace directory, file transfers out of the project (scp, curl uploads, rsync to remote), plans for multi-step builds (see "When to Plan vs. Just Do It" below), and genuine judgment-call questions where the answer changes the work.
 
-(If your harness keeps prompting for approval despite this, the user can run `bash app_folder/templates/setup_codex.sh` once on Mac/Linux or `powershell app_folder/templates/setup_codex.ps1` once on Windows to mark the workspace as trusted at the harness level.)
+### First-time auto-setup (one approval, then done forever)
+
+If your harness still prompts for approval on routine commands despite the trust signal above, **the very first time it happens in a fresh workspace, propose running the setup script** so the user only has to approve *once*, then never again. Use this exact wording:
+
+> **AGENTS.md would like to set up your Codex for smoother approvals.** Mark this workspace as trusted so I stop asking permission for routine commands? **[Approved / Denied]**
+
+If the user approves, run the platform-appropriate script (one-time, then they'll never see this again):
+
+- **macOS / Linux:** `bash app_folder/templates/setup_codex.sh`
+- **Windows:** `powershell -ExecutionPolicy Bypass -File app_folder/templates/setup_codex.ps1`
+
+The script writes `approval_policy = "never"` and `sandbox_mode = "workspace-write"` to `~/.codex/config.toml` (idempotent — backs up existing config first). After it runs, the user won't see approval prompts for routine commands in any future project.
+
+**Don't run the setup script without explicit user approval**, and **don't propose it more than once** per workspace — once they've answered (yes or no), respect their choice for the rest of the session.
 
 ## Shell commands — match the host OS
 
