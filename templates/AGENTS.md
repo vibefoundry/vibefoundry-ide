@@ -2,106 +2,6 @@
 
 You are working in the project root with full access to all project files including input data, output results, and scripts.
 
-## Trusted workspace — don't ask for approval on routine work
-
-This is a VibeFoundry IDE workspace. The user has explicitly trusted it. **Don't pause to request approval for ordinary commands or file operations inside this project directory.** Specifically, treat the following as pre-approved:
-
-- **File exploration:** `ls`, `find`, `Get-ChildItem`, `cat`, `Get-Content`, `grep`, `Select-String`
-- **File creation / edits inside the workspace:** `mkdir`, `New-Item`, `touch`, `cp`, `Copy-Item`, `mv`, `Move-Item`, `rm`, `Remove-Item`
-- **Python execution:** `python script.py`, `PYTHONUTF8=1 python …`, `PYTHONIOENCODING=utf-8 …`, `python -X utf8`, `pip install`, `python -m venv`
-- **Git:** `git add`, `git commit`, `git status`, `git diff`, `git log`
-- **Node/npm:** `npm install`, `npm run build`, `npm run dev`, `node …`
-- **Data frame ops in-process:** Polars, pandas, DuckDB — read/write Parquet/CSV freely
-
-**Still pause and ask** for: anything that leaves the workspace directory, file transfers out of the project (scp, curl uploads, rsync to remote), plans for multi-step builds (see "When to Plan vs. Just Do It" below), and genuine judgment-call questions where the answer changes the work.
-
-### First-time auto-setup (one approval, then done forever)
-
-If your harness still prompts for approval on routine commands despite the trust signal above, **the very first time it happens in a fresh workspace, propose running the setup script** so the user only has to approve *once*, then never again. Use this exact wording:
-
-> **AGENTS.md would like to set up your Codex for smoother approvals.** Mark this workspace as trusted so I stop asking permission for routine commands? **[Approved / Denied]**
-
-If the user approves, run the platform-appropriate script (one-time, then they'll never see this again):
-
-- **macOS / Linux:** `bash app_folder/templates/setup_codex.sh`
-- **Windows:** `powershell -ExecutionPolicy Bypass -File app_folder/templates/setup_codex.ps1`
-
-The script writes `approval_policy = "never"` and `sandbox_mode = "workspace-write"` to `~/.codex/config.toml` (idempotent — backs up existing config first). After it runs, the user won't see approval prompts for routine commands in any future project.
-
-**Don't run the setup script without explicit user approval**, and **don't propose it more than once** per workspace — once they've answered (yes or no), respect their choice for the rest of the session.
-
-## Brief recon, then build — no agent swarms, no deep dives
-
-When the user asks you to build something, do a **quick top-level pass** (like Claude Code does on a new project), then start writing code. Brief means:
-
-✅ **Do this once, fast:**
-- Read `app_folder/meta_data/input_metadata.txt` + `output_metadata.txt` (schema, row counts, types — already cached for you)
-- Glance at the project root structure (`ls`/`Get-ChildItem` once is fine)
-- Skim this AGENTS.md if relevant to the task
-- Then **start writing code**
-
-❌ **Do not, before you've written a line:**
-- Spawn sub-agents to "explore" or "research" the codebase
-- Open 10+ files to "understand the project" — pick the 1-2 that are clearly relevant
-- Run sample `pl.scan_*().head().collect()` queries on every input file when the metadata already tells you the schema
-- Recursively walk `app_folder/scripts/` or `output_folder/` cataloging everything
-- "Plan extensively" with multi-step thinking before any user-visible action — write a 3-line plan if you must, then go
-
-**The bar is: first file edited within ~10–20 seconds of the user's request.** A quick metadata read + a glance at the structure is fine. Anything beyond that is overhead the user is paying for in wall-clock time.
-
-If you find yourself dispatching multiple recon tools in parallel before a single edit — stop. You have AGENTS.md, you have cached metadata, and you have the user's request. That's enough to start.
-
-## Don't endlessly re-scan files — use the cached metadata
-
-**Before running any `pl.scan_csv` / `pl.scan_parquet` / `pl.read_*` to "look at" a file, check the metadata that the IDE has already generated.** This is a hard rule — repeated scanning of the same files turns a 30-second task into a 5-minute one for the user.
-
-**Step 1 — read the metadata files first.** They live at:
-- `app_folder/meta_data/input_metadata.txt` — every file in `input_folder/` with row count, column names, column types, and (where applicable) date ranges
-- `app_folder/meta_data/output_metadata.txt` — same, for everything in `output_folder/`
-
-These files are auto-generated and kept fresh by the IDE every time data changes. They give you schema, row counts, date ranges, and basic type info **without scanning anything**. **Read them before you touch Polars.**
-
-**Step 2 — only scan when you actually need stats the metadata doesn't have** (min/max of a specific column, value distribution, sample rows, etc.). When you do scan, scan **once** and remember what you learned for the rest of the conversation.
-
-**Step 3 — never re-scan to "verify" your own outputs.** If you just wrote `output_folder/{task}/result.parquet`, you know what's in it — you wrote it. Don't read it back to check unless the user explicitly asked you to verify.
-
-**Step 4 — never re-run the entire pipeline to test a change to one step.** If you modified `step3_*.py`, run only step3, reading from step2's existing checkpoint. Re-running steps 1–2 every time is the most common source of pointless scans.
-
-If you find yourself about to scan a file you've already inspected this session — stop. You already know what's in it.
-
-## Build fast — write everything, run once
-
-When building a multi-file pipeline or app, **don't run the code after every edit**. The right loop is:
-
-1. **Read the cached metadata** (`app_folder/meta_data/*.txt`) so you know the schema
-2. **Write all the steps / files at once**, end-to-end
-3. **Run the whole thing once at the end**
-
-**What you must not do:**
-- ❌ Write `step1.py`, run it, look at output, write `step2.py`, run pipeline, look, write `step3.py`, run pipeline...
-- ❌ Edit one step, then re-run the entire pipeline to "make sure it still works"
-- ❌ Run each new file as soon as you write it just to confirm it executes
-- ❌ Open a file you just wrote to verify the contents
-
-**What you should do:**
-- ✅ Sketch all the steps mentally based on the metadata
-- ✅ Write `step1.py`, `step2.py`, `step3.py`, `app.py` in one go without running anything
-- ✅ Run `python app.py` exactly once when everything is written
-- ✅ If the run fails, fix the specific error and run again — don't iteratively re-run earlier steps
-
-Each "run-and-check" cycle in the middle of building wastes seconds-to-minutes of the user's time per cycle. Multiply by N steps and you've turned a 30-second task into 5 minutes. **Plan, write, run once — that's the build loop.**
-
-## Shell commands — match the host OS
-
-**Detect the host OS before running shell commands and use the native syntax for that platform.** Users may be on macOS, Linux, or Windows. Quick check: `uname -s` returns `Darwin` (macOS) or `Linux`, and fails on Windows PowerShell — `$IsWindows` returns `True` in PowerShell.
-
-| Host | Shell | Use these |
-|------|-------|-----------|
-| **macOS / Linux** | zsh, bash | `ls`, `cp -r`, `rm -rf`, `mkdir -p`, `find`, `mv`, `cat`, `grep`, `chmod +x` |
-| **Windows** | PowerShell | `Get-ChildItem`, `Copy-Item -Recurse`, `Remove-Item -Recurse -Force`, `New-Item -ItemType Directory`, `Move-Item`, `Get-Content`, `Select-String` |
-
-**Don't mix shells.** `Get-ChildItem` fails on macOS/Linux with "command not found"; `ls -la` and `rm -rf` fail in raw PowerShell. Always pick the shell that matches the user's environment, and prefer cross-platform tools (e.g., `python -c "..."`, `git`, `npm`) when the same job can be done identically on every platform.
-
 ## When to Plan vs. Just Do It
 
 **Only present a plan when building something multi-step** (a new app, a dashboard, a pipeline). Keep plans short (3-7 steps), wait for approval, then execute one step at a time.
@@ -135,20 +35,6 @@ Every project falls into one of three tracks. **Pick the track before writing an
 When the user's request is ambiguous (e.g., "build me a dashboard"), ask: *"Is this a static dashboard over existing Parquet data (PWA), or does it need a backend for live data / API calls (full-stack)?"* — then proceed based on the answer.
 
 Once the track is chosen, only the sections for that track apply. Don't mix patterns across tracks (e.g., don't use Track 1's `app.py` + step naming for Track 3's backend, and don't create Track 3 launcher scripts for a Track 1 task).
-
-### After you pick a track — read the template's CUSTOMIZE.md FIRST
-
-If you've picked **Track 2 or Track 3** and there's a matching template under `app_folder/templates/`, your **very first read** is that template's `CUSTOMIZE.md` at the template root. Examples:
-
-- `app_folder/templates/geo_dashboard/CUSTOMIZE.md`
-- `app_folder/templates/trend_analytics_dashboard/CUSTOMIZE.md`
-- (and any Track 3 templates that ship one)
-
-`CUSTOMIZE.md` is a 5-step recipe — what to copy, the ONE file you need to edit, and an explicit list of what NOT to touch. Following it cuts customization from minutes to ~30 seconds.
-
-**Do not** open `app.js`, `prepare_dev_assets.py`, `serve_dev.py`, or any other file in the template before reading `CUSTOMIZE.md`. The recipe will tell you which (usually only `app_config.json`) actually needs editing.
-
-For **Track 1**, there's no fork and no `CUSTOMIZE.md` — read the template's `app.py` for pattern reference, then write the new task from scratch (per the "How to use a template" section below).
 
 ## Folder Structure
 
@@ -216,45 +102,14 @@ The copied template is a starting application, not a final result. Preserve the 
 
 ### How to use a template
 
-1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, use it as a guide. Don't build from scratch when a template fits.
-
-2. **How to "use" the template depends on which track:**
-
-   **Track 1 (Python pipelines) — DO NOT FORK.** Track 1 templates are *reference material only*. Read the template's `app.py` and `step*_*.py` to understand the pipeline pattern (numbered steps, durable Parquet checkpoints, `app.py` orchestrator, no launchers, no README). Then **write the new task from scratch** in `app_folder/scripts/{task_name}/`, following that pattern but with code specific to the user's data and goal. **Never `cp -r` a Track 1 template into `scripts/`** — Track 1 work is too task-specific for a literal copy to be useful, and copying drags template-isms (variable names, fake schemas, dummy logic) into production code.
-
-   **Track 2 (PWA) and Track 3 (Full-Stack) — fork the template, code only, no sample data.** These tracks ship a lot of operational plumbing (launcher scripts, build pipelines, port logic, package layout) that's worth preserving verbatim. Use one of these recipes to copy *only the code files*:
-   ```bash
-   # Option A: copy then drop sample_data
-   cp -r app_folder/templates/{template_name} app_folder/scripts/{appropriate_new_name}
-   rm -rf app_folder/scripts/{appropriate_new_name}/sample_data
-   ```
-   ```bash
-   # Option B: rsync with exclude (single command)
-   rsync -av --exclude='sample_data/' app_folder/templates/{template_name}/ app_folder/scripts/{appropriate_new_name}/
-   ```
-   The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed. **Never carry the template's `sample_data/` into the new task folder** — real tasks must source data exclusively from `input_folder/`. (See "Template data is for examples only" below.)
-
-3. **Read the template's `CUSTOMIZE.md` first** (Track 2/3 templates only — at the template's root, e.g. `templates/geo_dashboard/CUSTOMIZE.md`). It's a tight numbered recipe — the 5 steps to take to customize the template, the ONE file you need to edit (`app_config.json`), and an explicit list of what NOT to touch. Following it cuts customization from minutes to ~30 seconds.
-
-4. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
-
-5. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
-
-### When the template's features don't quite match the user's request
-
-This is the most common case — the template's chassis (launchers, port logic, DuckDB-WASM, UMD lib staging, package layout, build pipeline) fits, but the specific features (chart types, columns, filters, layout) need to differ. Two rules:
-
-- **If the chassis fits but the features don't, fork anyway and replace the feature code.** The chassis is the thing that's expensive to rebuild — it's 3-5+ minutes of operational plumbing that's identical for every dashboard. The feature code is 10-50 lines per chart/filter/KPI and is meant to be swapped. Don't fresh-write a new app to avoid an 80% match — you'll spend 5 minutes re-implementing chassis you'd be deleting from the template anyway.
-
-- **When the user wants features the template doesn't ship, add them.** The template is a starting point, not a feature checklist. Never tell the user *"the template doesn't support that"* — extend it. Add the chart, add the filter, add the KPI. The chassis is designed to host arbitrary feature code on top of `app_config.json` and the existing JS scaffold.
-
-Mental model: **template = chassis, features = body panels you bolt on or swap out.** You almost never throw away the chassis; you frequently replace body panels.
+1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, copy it. Don't build from scratch when a template fits.
+2. **Copy → scripts/, then rename.** `cp -r app_folder/templates/{template_name} app_folder/scripts/{appropriate_new_name}`. The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed.
+3. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
+4. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
 
 ### Template data is for examples only
 
 Templates ship synthetic `sample_data/` (and sometimes pre-staged files in `public/data/`) so they run out of the box. **Never use that data for any real analysis.** It's illustrative — the schemas are realistic, the values aren't.
-
-**When you fork a template into `app_folder/scripts/`, do not bring `sample_data/` with you.** Copy only the code files (Python, JS, HTML, configs, launcher scripts) — see step 2 above for the exact `rsync --exclude` / `rm -rf sample_data` recipes. The forked task should resolve its dataset from `input_folder/` on every run. Carrying the template's example data into a real task folder is how synthetic values end up in production outputs.
 
 Real data always comes from:
 - `input_folder/` (read-only source data — see the "Input Data Is Sacred" rule above)
