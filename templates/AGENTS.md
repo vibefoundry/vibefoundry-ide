@@ -240,6 +240,16 @@ The copied template is a starting application, not a final result. Preserve the 
 
 5. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
 
+### When the template's features don't quite match the user's request
+
+This is the most common case — the template's chassis (Vite, launchers, port logic, DuckDB-WASM, package layout, build pipeline) fits, but the specific features (chart types, columns, filters, layout) need to differ. Two rules:
+
+- **If the chassis fits but the features don't, fork anyway and replace the feature code.** The chassis is the thing that's expensive to rebuild — it's 3-5+ minutes of operational plumbing that's identical for every dashboard. The feature code is 10-50 lines per chart/filter/KPI and is meant to be swapped. Don't fresh-write a new app to avoid an 80% match — you'll spend 5 minutes re-implementing chassis you'd be deleting from the template anyway.
+
+- **When the user wants features the template doesn't ship, add them.** The template is a starting point, not a feature checklist. Never tell the user *"the template doesn't support that"* — extend it. Add the chart, add the filter, add the KPI. The chassis is designed to host arbitrary feature code on top of `app_config.json` and the existing JS scaffold.
+
+Mental model: **template = chassis, features = body panels you bolt on or swap out.** You almost never throw away the chassis; you frequently replace body panels.
+
 ### Template data is for examples only
 
 Templates ship synthetic `sample_data/` (and sometimes pre-staged files in `public/data/`) so they run out of the box. **Never use that data for any real analysis.** It's illustrative — the schemas are realistic, the values aren't.
