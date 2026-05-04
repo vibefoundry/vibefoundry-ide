@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5174",
+    "dev": "vite --host 127.0.0.1 --open",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 4174"
+    "preview": "vite preview --host 127.0.0.1 --open"
   },
   "devDependencies": {
+    "@duckdb/duckdb-wasm": "^1.29.1",
+    "esbuild": "^0.25.4",
     "vite": "^5.4.0"
   },
   "dependencies": {

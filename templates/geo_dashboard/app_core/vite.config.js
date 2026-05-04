@@ -1,13 +1,13 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  root: ".",
+  root: "src_app",
   publicDir: "public",
   server: {
     strictPort: false
   },
   build: {
-    outDir: "dist",
+    outDir: "../dist",
     emptyOutDir: true,
     target: "es2020"
   }

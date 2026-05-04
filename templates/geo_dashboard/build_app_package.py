@@ -1,10 +1,8 @@
 """
 Builds the geo_dashboard PWA into a Track 2 distributable package at
-output_folder/geo_dashboard/. Resolves the dataset (input_folder first,
-sample_data fallback), runs `npm install` + `npm run build` (Vite), then
-assembles the launcher trio + application_files/ structure.
+output_folder/geo_dashboard/. Reuses the dev-asset prep flow, runs the Vite
+production build, then assembles the launcher trio plus application_files/.
 """
-import json
 import os
 import shutil
 import subprocess
@@ -12,62 +10,25 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
-INPUT_FOLDER = os.path.join(PROJECT_DIR, "input_folder")
 OUTPUT_FOLDER = os.path.join(PROJECT_DIR, "output_folder")
+APP_CORE_DIR = os.path.join(SCRIPT_DIR, "app_core")
+
+sys.path.insert(0, APP_CORE_DIR)
+
+from prepare_dev_assets import prepare_dev_assets
 
 APP_NAME = os.path.basename(SCRIPT_DIR)
 PACKAGE_DIR = os.path.join(OUTPUT_FOLDER, APP_NAME)
 APP_FILES = os.path.join(PACKAGE_DIR, "application_files")
 
-PUBLIC_DATA = os.path.join(SCRIPT_DIR, "public", "data")
-PUBLIC_LIB = os.path.join(SCRIPT_DIR, "public", "lib")
-SAMPLE_DATA = os.path.join(SCRIPT_DIR, "sample_data")
-DIST_DIR = os.path.join(SCRIPT_DIR, "dist")
-CONFIG_PATH = os.path.join(PUBLIC_DATA, "app_config.json")
+APP_SOURCE_DIR = os.path.join(APP_CORE_DIR, "src_app")
+# Vite's outDir is "../dist" relative to root="src_app", so dist lands inside app_core/.
+DIST_DIR = os.path.join(APP_CORE_DIR, "dist")
 
 
 def banner(msg):
     line = "=" * 60
     print(f"\n{line}\n {msg}\n{line}")
-
-
-def resolve_dataset():
-    """Stage the dataset into public/data/. Priority:
-      1. input_folder/{file}   -> always wins (overwrites)
-      2. existing public/data/ -> kept as-is (no-op)
-      3. sample_data/sample.parquet -> fallback (never overwrites real data)
-    """
-    with open(CONFIG_PATH) as f:
-        config = json.load(f)
-    data_file = config["data"]["file"]
-    target = os.path.join(PUBLIC_DATA, data_file)
-
-    input_src = os.path.join(INPUT_FOLDER, data_file)
-    sample_src = os.path.join(SAMPLE_DATA, "sample.parquet")
-
-    if os.path.exists(input_src):
-        os.makedirs(PUBLIC_DATA, exist_ok=True)
-        shutil.copy2(input_src, target)
-        print(f"[data] Staged input_folder/{data_file} -> public/data/{data_file}")
-        return "input_folder"
-
-    if os.path.exists(target) and os.path.getsize(target) > 0:
-        print(f"[data] Using existing public/data/{data_file} (size: {os.path.getsize(target):,} bytes).")
-        return "existing"
-
-    if os.path.exists(sample_src):
-        os.makedirs(PUBLIC_DATA, exist_ok=True)
-        shutil.copy2(sample_src, target)
-        print(f"[data] Staged sample_data/sample.parquet -> public/data/{data_file}")
-        print("[data] *** USING SAMPLE DATA *** Drop the real parquet in input_folder/ to switch.")
-        return "sample_data"
-
-    raise SystemExit(
-        f"[data] No dataset available. Provide one at:\n"
-        f"  - {input_src}\n"
-        f"  - {sample_src}\n"
-        f"  - {target}\n"
-    )
 
 
 def run(cmd, cwd):
@@ -77,20 +38,10 @@ def run(cmd, cwd):
         sys.exit(result.returncode)
 
 
-def npm_install_if_needed():
-    node_modules = os.path.join(SCRIPT_DIR, "node_modules")
-    pkg_lock = os.path.join(SCRIPT_DIR, "package-lock.json")
-    if os.path.exists(node_modules) and os.path.exists(pkg_lock):
-        if os.path.getmtime(node_modules) >= os.path.getmtime(pkg_lock):
-            print("[npm] node_modules is up to date — skipping install.")
-            return
-    run(["npm", "install"], cwd=SCRIPT_DIR)
-
-
 def vite_build():
     if os.path.exists(DIST_DIR):
         shutil.rmtree(DIST_DIR)
-    run(["npm", "run", "build"], cwd=SCRIPT_DIR)
+    run(["npm", "run", "build"], cwd=APP_CORE_DIR)
 
 
 def assemble_package():
@@ -217,16 +168,13 @@ def main():
     print(f"Package: {PACKAGE_DIR}")
     print()
 
-    banner("[1/4] Resolve dataset")
-    resolve_dataset()
+    banner("[1/3] Prepare dev assets")
+    prepare_dev_assets()
 
-    banner("[2/4] Install npm deps (if needed)")
-    npm_install_if_needed()
-
-    banner("[3/4] Vite build")
+    banner("[2/3] Vite build")
     vite_build()
 
-    banner("[4/4] Assemble distributable package")
+    banner("[3/3] Assemble distributable package")
     assemble_package()
 
     banner("Done")

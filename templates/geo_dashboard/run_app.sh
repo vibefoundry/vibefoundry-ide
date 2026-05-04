@@ -1,13 +1,15 @@
 #!/bin/bash
-# Run: bash app_folder/templates/geo_dashboard/run_app.sh
 set -e
 cd "$(dirname "$0")"
-APP_NAME="$(basename "$(pwd)")"
 
-echo "[1/2] Building app package..."
-python3 build_app_package.py
+echo "========================================"
+echo " Geo Dashboard Dev"
+echo "========================================"
+echo ""
+echo "Preparing dev assets and starting Vite. Browser will open to whichever port Vite picks."
+echo "Press Ctrl+C to stop."
+echo ""
 
-echo "[2/2] Launching..."
-PROJECT_DIR="$(cd ../../.. && pwd)"
-OUTPUT_PKG="$PROJECT_DIR/output_folder/$APP_NAME"
-bash "$OUTPUT_PKG/mac_start.sh"
+python3 app_core/prepare_dev_assets.py
+cd app_core
+npm run dev

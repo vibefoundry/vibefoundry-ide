@@ -24,5 +24,5 @@ Same sidebar filter set as the geo dashboard.
 
 | Goal | Command |
 |---|---|
-| Production build + launch | `bash run_app.sh` |
-| Vite HMR | `bash start_dev.sh` (:5174) |
+| Local testing with HMR | `bash run_app.sh` |
+| Explicit package build | `python3 build_app_package.py` |

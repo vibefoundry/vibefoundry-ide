@@ -1,12 +1,16 @@
 @echo off
-REM Run: app_folder\templates\trend_analytics_dashboard\run_app.bat
 cd /d "%~dp0"
-for %%I in ("%cd%") do set APP_NAME=%%~nxI
 
-echo [1/2] Building app package...
-python build_app_package.py
+echo ========================================
+echo  Trend Analytics Dashboard Dev
+echo ========================================
+echo.
+echo Preparing dev assets and starting Vite. Browser will open to whichever port Vite picks.
+echo Close this window to stop the dev server.
+echo.
+
+python app_core\prepare_dev_assets.py
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
-echo [2/2] Launching...
-cd /d "%~dp0..\..\..\output_folder\%APP_NAME%"
-call pc_start.bat
+cd /d "%~dp0app_core"
+npm run dev

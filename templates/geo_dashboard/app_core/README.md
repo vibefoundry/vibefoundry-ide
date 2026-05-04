@@ -20,40 +20,45 @@ The forward-compatible `app_config.json` schema already includes fields (`role`,
 
 ## Folder layout
 
+The task root only holds operational entrypoints (the launcher trio + `build_app_package.py`).
+Everything else lives under `app_core/` so the root stays clean.
+
 ```
 geo_dashboard/
-├── build_app_package.py     <- Wraps `npm run build` + assembles the Track 2 distributable
-├── run_app.sh / run_app.bat <- Developer one-command rebuild + launch (uses the production package)
-├── start_dev.sh / .command  <- Vite dev server with HMR (faster iteration during dev)
-├── package.json, vite.config.js
-├── index.html, css/, js/    <- Source
-├── public/
-│   ├── data/
-│   │   ├── app_config.json  <- COMMITTED — source of truth for column metadata
-│   │   ├── manifest.json    <- COMMITTED — dataset list
-│   │   ├── *.parquet        <- gitignored, staged by build script
-│   │   └── boundaries/      <- gitignored, TIGER reference GeoJSONs
-│   └── lib/                 <- gitignored, DuckDB/React/Leaflet UMDs
-├── sample_data/
-│   └── sample.parquet       <- COMMITTED — synthetic placeholder so app runs OOTB
-└── dist/, node_modules/     <- gitignored build artifacts
+├── build_app_package.py        <- Reuses dev-asset prep, then assembles the Track 2 distributable
+├── run_app.sh / run_app.bat    <- Local dev launcher (calls app_core/prepare_dev_assets.py + vite)
+└── app_core/
+    ├── prepare_dev_assets.py   <- Stages data + browser libs for local Vite dev and packaging
+    ├── package.json, vite.config.js
+    ├── src_app/
+    │   ├── index.html, css/, js/  <- Source
+    │   └── public/
+    │       ├── data/
+    │       │   ├── app_config.json  <- COMMITTED — source of truth for column metadata
+    │       │   ├── manifest.json    <- COMMITTED — dataset list
+    │       │   ├── *.parquet        <- gitignored, staged by the dev-prep flow
+    │       │   └── boundaries/      <- gitignored, TIGER reference GeoJSONs
+    │       └── lib/                 <- gitignored, DuckDB/React/Leaflet UMDs
+    ├── sample_data/
+    │   └── sample.parquet      <- COMMITTED — synthetic placeholder so app runs OOTB
+    └── dist/, node_modules/    <- gitignored build artifacts (vite outputs to app_core/dist/)
 ```
 
 ## Data sourcing (build script priority)
 
-`build_app_package.py` resolves the dataset in this order:
+`prepare_dev_assets.py` and `build_app_package.py` resolve the dataset in this order:
 1. `input_folder/{file_from_app_config.json}` — real client data
 2. `sample_data/sample.parquet` — synthetic fallback (small, committed)
-3. Existing `public/data/{file}` if present (no-op)
+3. Existing `src_app/public/data/{file}` if present (no-op)
 
-The build script prints a banner indicating which source it used.
+The prep/build scripts print a banner indicating which source they used.
 
 ## Two dev workflows
 
 | Goal | Command | What it does |
 |---|---|---|
-| Production-shaped local run | `bash run_app.sh` | Runs `build_app_package.py` → spins up the actual distributable in `output_folder/` |
-| Fast HMR iteration on `js/app.js` | `bash start_dev.sh` | Starts `vite dev` on localhost:5173 with hot reload |
+| Local testing with HMR | `bash run_app.sh` | Runs `prepare_dev_assets.py`, then starts `vite dev` on localhost:5173 |
+| Explicit package build | `python3 build_app_package.py` | Reuses dev-asset prep, builds `dist/`, and assembles the distributable in `output_folder/` |
 
 ## Deleted in this refactor
 
