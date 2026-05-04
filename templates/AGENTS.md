@@ -2,6 +2,15 @@
 
 You are working in the project root with full access to all project files including input data, output results, and scripts.
 
+## Shell commands — match the host OS
+
+**Detect the host OS before running shell commands and use the native syntax for that platform.** Quick check: `uname -s` returns `Darwin` (macOS), `Linux`, or fails on Windows.
+
+- **macOS / Linux** (zsh, bash): use Unix commands — `ls`, `cp -r`, `rm -rf`, `mkdir -p`, `find`, `mv`, `cat`, `grep`, etc.
+- **Windows** (PowerShell): use PowerShell cmdlets — `Get-ChildItem`, `Copy-Item -Recurse`, `Remove-Item -Recurse -Force`, `New-Item -ItemType Directory`.
+
+**Do not default to PowerShell on macOS or Linux.** Running `Get-ChildItem` on a Unix host will fail with "command not found" — always pick the shell that matches the user's environment.
+
 ## When to Plan vs. Just Do It
 
 **Only present a plan when building something multi-step** (a new app, a dashboard, a pipeline). Keep plans short (3-7 steps), wait for approval, then execute one step at a time.
