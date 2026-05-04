@@ -1,0 +1,26 @@
+{
+  "_schema_version": 1,
+  "_schema_notes": "Forward-compatible schema. Option A only consumes data.file plus columns[].name/type. Other fields (role, label, filterable, values, color_map) are inert and reserved for Option B/C evolution.",
+  "data": {
+    "file": "app_data.parquet",
+    "lat_column": "Lat",
+    "long_column": "Long",
+    "account_id_column": "Account Code",
+    "state_code_column": "State",
+    "county_geoid_column": "County GEOID"
+  },
+  "columns": [
+    { "name": "State Name", "type": "categorical", "role": "geo_state_name", "label": "State", "filterable": "select" },
+    { "name": "County Name", "type": "categorical", "role": "geo_county_name", "label": "County" },
+    { "name": "Tract Name", "type": "categorical", "role": "geo_tract_name", "label": "Tract" },
+    { "name": "Channel", "type": "categorical", "role": "color_by", "label": "Channel", "filterable": "select", "color_map": { "Restaurant": "#c2410c", "Retail": "#0e7490", "Wholesale": "#7e22ce" } },
+    { "name": "Account Tier", "type": "categorical", "role": "categorical_filter", "label": "Account Tier", "filterable": "select", "values": ["A", "B", "C", "D"] },
+    { "name": "Account Code", "type": "categorical", "role": "account_id", "label": "Account", "filterable": "text" },
+    { "name": "Brand", "type": "categorical", "role": "text_filter", "label": "Brand", "filterable": "text" },
+    { "name": "Variety", "type": "categorical", "role": "text_filter", "label": "Variety", "filterable": "text" },
+    { "name": "Size_ML", "type": "numeric", "role": "size", "label": "Size (mL)", "filterable": "select" },
+    { "name": "Cases 2024", "type": "numeric", "role": "metric", "label": "Cases 2024" },
+    { "name": "Cases 2025", "type": "numeric", "role": "metric", "label": "Cases 2025", "filterable": "range" },
+    { "name": "Cases 2026", "type": "numeric", "role": "metric", "label": "Cases 2026", "filterable": "range" }
+  ]
+}

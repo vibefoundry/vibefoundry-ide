@@ -1,0 +1,11 @@
+node_modules/
+dist/
+
+# Downloadable / regeneratable third-party UMD libs (DuckDB, React, Leaflet)
+public/lib/
+
+# Client data — sourced from input_folder/ or sample_data/ at build time
+public/data/*.parquet
+
+# TIGER reference boundaries — large, kept out of git history
+public/data/boundaries/

@@ -567,9 +567,19 @@ async def build_project(request: Request):
     jwt = auth_header.split(" ", 1)[1].strip() if auth_header.lower().startswith("bearer ") else ""
     templates_written: list[str] = []
 
+    # Templates land inside app_folder/ alongside the user's scripts. The
+    # exception is AGENTS.md which Claude expects at the project root —
+    # we move it back after the cascade.
+    app_folder = state.project_folder / "app_folder"
+    app_folder.mkdir(parents=True, exist_ok=True)
+
     if jwt:
         try:
-            templates_written = await _cascade_templates_via_proxy(state.project_folder, jwt)
+            templates_written = await _cascade_templates_via_proxy(app_folder, jwt)
+            # Hoist AGENTS.md from app_folder/ → project root so Claude finds it.
+            agents_in_app = app_folder / "AGENTS.md"
+            if agents_in_app.exists():
+                agents_in_app.replace(state.project_folder / "AGENTS.md")
         except Exception as e:
             print(f"[Build] Proxy cascade failed ({e}); falling back to public path")
 
