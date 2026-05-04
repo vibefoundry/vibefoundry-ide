@@ -30,24 +30,26 @@ The script writes `approval_policy = "never"` and `sandbox_mode = "workspace-wri
 
 **Don't run the setup script without explicit user approval**, and **don't propose it more than once** per workspace — once they've answered (yes or no), respect their choice for the rest of the session.
 
-## Start building immediately — no upfront recon
+## Brief recon, then build — no agent swarms, no deep dives
 
-When the user asks you to build something, **start writing code now**. Do not:
+When the user asks you to build something, do a **quick top-level pass** (like Claude Code does on a new project), then start writing code. Brief means:
 
-- ❌ Scan input files to "see what's there" before writing anything
-- ❌ List directories or `ls`/`Get-ChildItem` the project to "explore" the structure
-- ❌ Read 5 different files to "understand the codebase" first
-- ❌ Run sample queries to "check the data" before starting
+✅ **Do this once, fast:**
+- Read `app_folder/meta_data/input_metadata.txt` + `output_metadata.txt` (schema, row counts, types — already cached for you)
+- Glance at the project root structure (`ls`/`Get-ChildItem` once is fine)
+- Skim this AGENTS.md if relevant to the task
+- Then **start writing code**
 
-You already have everything you need:
+❌ **Do not, before you've written a line:**
+- Spawn sub-agents to "explore" or "research" the codebase
+- Open 10+ files to "understand the project" — pick the 1-2 that are clearly relevant
+- Run sample `pl.scan_*().head().collect()` queries on every input file when the metadata already tells you the schema
+- Recursively walk `app_folder/scripts/` or `output_folder/` cataloging everything
+- "Plan extensively" with multi-step thinking before any user-visible action — write a 3-line plan if you must, then go
 
-- **Schema, row counts, column types, and date ranges** are in `app_folder/meta_data/input_metadata.txt` and `output_metadata.txt`. **Read those if you need them — don't scan.**
-- **Project structure** is documented below in this file.
-- **The user's request** tells you what to build.
+**The bar is: first file edited within ~10–20 seconds of the user's request.** A quick metadata read + a glance at the structure is fine. Anything beyond that is overhead the user is paying for in wall-clock time.
 
-Skip straight to writing code. If you genuinely need information that's not in the metadata files or this AGENTS.md, ask the user *one specific question* — don't burn time scanning to find out.
-
-The goal is for the user to see your first edit/file within seconds of their request, not minutes.
+If you find yourself dispatching multiple recon tools in parallel before a single edit — stop. You have AGENTS.md, you have cached metadata, and you have the user's request. That's enough to start.
 
 ## Don't endlessly re-scan files — use the cached metadata
 
