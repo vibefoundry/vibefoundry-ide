@@ -81,6 +81,25 @@ This is a hard rule with no exceptions. Even if the user says "fix the data" or 
 
 Reusable boilerplates live in `app_folder/templates/{template_name}/`. They exist to be **copied into `app_folder/scripts/`, renamed, and refactored** for the specific task at hand — not to be edited in place.
 
+### App-building method: template-first, then refactor
+
+When creating a new app, dashboard, geospatial tool, or processing pipeline, **copy the closest appropriate template first, then refactor that copied app to meet the user's needs.** Do not build the scaffold from scratch when a local template or a template in this file matches the request.
+
+Template selection order:
+
+1. **Use local templates first.** Look in `app_folder/templates/` for the closest matching full-app template. Copy the entire template folder into `app_folder/scripts/{user_requested_or_reasonable_app_name}/`, then refactor the copied files there. Never edit the original template in `app_folder/templates/`.
+2. **If no local full-app template exists, use the relevant template/scaffold in this file.** Create the task folder under `app_folder/scripts/{app_name}/`, copy the required structure from this file, then refactor it.
+3. **Only create a scaffold manually when no matching template exists.** Even then, follow the closest track template in this file for folder layout, launchers, path handling, dynamic ports, packaging, and orchestration.
+
+Category matching:
+
+- **Geospatial dashboard or map app:** Copy the closest geospatial dashboard/map template first, then refactor data loading, spatial joins, map layers, filters, viewport defaults, legends, charts, and styling for the user's actual data and goal.
+- **Dashboard or data explorer:** Copy the closest dashboard/explorer template first, then refactor datasets, DuckDB/Polars queries, charts, filters, KPIs, tables, and interactions.
+- **Processing pipeline or analysis task:** Copy the closest Track 1 pipeline template first, then refactor `app.py` and `step*_*.py` so the steps perform the requested processing and write the required Parquet/PNG outputs.
+- **Full-stack app:** Copy the closest React + Python backend template first, then refactor backend routes, frontend workflow, API contracts, and data processing while preserving setup/run/cache scripts and dynamic-port behavior.
+
+The copied template is a starting application, not a final result. Preserve the proven operational plumbing: launcher scripts where required, dynamic-port logic, package structure, path handling, `VF_RUN_FOLDER`, fail-fast orchestration, and dependency checks. Replace or refactor the app-specific behavior: UI, routes, data queries, transformations, charts, map layers, copy, styling, and domain logic so the final app matches the user's request and the actual project data.
+
 ### How to use a template
 
 1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, copy it. Don't build from scratch when a template fits.
@@ -159,6 +178,20 @@ OUTPUT_FOLDER = os.path.join(PROJECT_DIR, "output_folder")
 ## Structuring Python Scripts
 
 **Every task — simple or complex — must have both an `app.py` orchestrator AND at least one `step1_*.py` script.** `app.py` never contains its own work logic. `app.py` only orchestrates — it runs `step1_*.py`, `step2_*.py`, etc. in sequence. Even a "one-line" task has an `app.py` that calls a `step1_*.py` where the actual work lives.
+
+### Orchestration is part of the processing methodology
+
+The `app.py` template is not just boilerplate. It is the processing-control layer for RAM-conscious, restartable pipelines. Preserve and use its behavior deliberately:
+
+- **Keep `app.py` lightweight.** It should not import Polars, read datasets, hold dataframes, create charts, or perform business logic. It only creates the run folder, sets `VF_RUN_FOLDER`, and runs step scripts.
+- **Run each step as a separate Python process.** The subprocess pattern is intentional: when a step finishes, its process exits and releases memory before the next step starts.
+- **Checkpoint every step to disk.** Each step writes its transformed dataset to Parquet in `output_folder/{task}/`. Downstream steps read that Parquet checkpoint instead of keeping upstream data in RAM.
+- **Design step boundaries around expensive operations.** If a pipeline has a large clean, join, aggregation, model, or visualization stage, split it so the expensive stage writes a reusable Parquet output before the next stage begins.
+- **Avoid oversized all-in-one steps.** Do not collapse independent cleaning, joining, aggregation, and visualization into one script if that would force multiple large dataframes to coexist in memory.
+- **Rerun only what changed.** After edits, run the changed step and downstream steps only. This saves processing time and avoids re-reading/recomputing large upstream inputs unnecessarily.
+- **Stop on failure.** Preserve `app.py`'s fail-fast behavior so downstream outputs are not regenerated from missing or stale upstream data.
+
+Think of the pipeline as a sequence of durable, memory-releasing checkpoints: raw input → step1 Parquet → step2 Parquet → step3 output. This is the default processing methodology for Track 1 work.
 
 **Multi-step tasks** (multiple outputs, transformations, or analyses) → break into separate `step1_*.py`, `step2_*.py`, ... scripts, each doing one job, chained together by the `app.py` orchestrator.
 
