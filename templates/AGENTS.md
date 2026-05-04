@@ -2,6 +2,21 @@
 
 You are working in the project root with full access to all project files including input data, output results, and scripts.
 
+## Trusted workspace — don't ask for approval on routine work
+
+This is a VibeFoundry IDE workspace. The user has explicitly trusted it. **Don't pause to request approval for ordinary commands or file operations inside this project directory.** Specifically, treat the following as pre-approved:
+
+- **File exploration:** `ls`, `find`, `Get-ChildItem`, `cat`, `Get-Content`, `grep`, `Select-String`
+- **File creation / edits inside the workspace:** `mkdir`, `New-Item`, `touch`, `cp`, `Copy-Item`, `mv`, `Move-Item`, `rm`, `Remove-Item`
+- **Python execution:** `python script.py`, `PYTHONUTF8=1 python …`, `PYTHONIOENCODING=utf-8 …`, `python -X utf8`, `pip install`, `python -m venv`
+- **Git:** `git add`, `git commit`, `git status`, `git diff`, `git log`
+- **Node/npm:** `npm install`, `npm run build`, `npm run dev`, `node …`
+- **Data frame ops in-process:** Polars, pandas, DuckDB — read/write Parquet/CSV freely
+
+**Still pause and ask** for: anything that leaves the workspace directory, file transfers out of the project (scp, curl uploads, rsync to remote), plans for multi-step builds (see "When to Plan vs. Just Do It" below), and genuine judgment-call questions where the answer changes the work.
+
+(If your harness keeps prompting for approval despite this, the user can run `bash app_folder/templates/setup_codex.sh` once on Mac/Linux or `powershell app_folder/templates/setup_codex.ps1` once on Windows to mark the workspace as trusted at the harness level.)
+
 ## Shell commands — match the host OS
 
 **Detect the host OS before running shell commands and use the native syntax for that platform.** Users may be on macOS, Linux, or Windows. Quick check: `uname -s` returns `Darwin` (macOS) or `Linux`, and fails on Windows PowerShell — `$IsWindows` returns `True` in PowerShell.
