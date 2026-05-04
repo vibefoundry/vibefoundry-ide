@@ -30,6 +30,24 @@ The script writes `approval_policy = "never"` and `sandbox_mode = "workspace-wri
 
 **Don't run the setup script without explicit user approval**, and **don't propose it more than once** per workspace — once they've answered (yes or no), respect their choice for the rest of the session.
 
+## Don't endlessly re-scan files — use the cached metadata
+
+**Before running any `pl.scan_csv` / `pl.scan_parquet` / `pl.read_*` to "look at" a file, check the metadata that the IDE has already generated.** This is a hard rule — repeated scanning of the same files turns a 30-second task into a 5-minute one for the user.
+
+**Step 1 — read the metadata files first.** They live at:
+- `app_folder/meta_data/input_metadata.txt` — every file in `input_folder/` with row count, column names, column types, and (where applicable) date ranges
+- `app_folder/meta_data/output_metadata.txt` — same, for everything in `output_folder/`
+
+These files are auto-generated and kept fresh by the IDE every time data changes. They give you schema, row counts, date ranges, and basic type info **without scanning anything**. **Read them before you touch Polars.**
+
+**Step 2 — only scan when you actually need stats the metadata doesn't have** (min/max of a specific column, value distribution, sample rows, etc.). When you do scan, scan **once** and remember what you learned for the rest of the conversation.
+
+**Step 3 — never re-scan to "verify" your own outputs.** If you just wrote `output_folder/{task}/result.parquet`, you know what's in it — you wrote it. Don't read it back to check unless the user explicitly asked you to verify.
+
+**Step 4 — never re-run the entire pipeline to test a change to one step.** If you modified `step3_*.py`, run only step3, reading from step2's existing checkpoint. Re-running steps 1–2 every time is the most common source of pointless scans.
+
+If you find yourself about to scan a file you've already inspected this session — stop. You already know what's in it.
+
 ## Shell commands — match the host OS
 
 **Detect the host OS before running shell commands and use the native syntax for that platform.** Users may be on macOS, Linux, or Windows. Quick check: `uname -s` returns `Darwin` (macOS) or `Linux`, and fails on Windows PowerShell — `$IsWindows` returns `True` in PowerShell.
