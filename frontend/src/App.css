@@ -4173,11 +4173,19 @@ body {
   margin: 0;
 }
 
-/* Hide only Clerk's branding badge + the dev-mode warning. The footer
-   itself stays visible so the "Don't have an account? Sign up" link
-   continues to render — that lives inside .cl-footer too. */
-.signin-screen .cl-badge,
+/* Inverse approach: hide every direct child of the footer except the
+   "Sign up" action. Clerk uses Stitches-generated random class names
+   for the badge and dev-mode banner, so individual class selectors
+   miss them between SDK versions. This catches them all. */
+.signin-screen .cl-footer > *:not([class*="footerAction"]):not(.cl-footerAction) {
+  display: none !important;
+}
+
+/* Also catch the dev-mode banner if it renders OUTSIDE the footer
+   (Clerk has historically placed it in either location). */
 .signin-screen [class*="developmentMode"],
+.signin-screen [class*="DevMode"],
+.signin-screen .cl-internal-developmentModeBanner,
 .signin-screen [data-localization-key*="development"] {
   display: none !important;
 }
