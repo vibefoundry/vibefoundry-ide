@@ -753,6 +753,9 @@ function App() {
             <button className="btn-flat" onClick={() => setShowBuildModal(true)}>
               Build
             </button>
+            <button className="btn-flat" onClick={() => setShowNewFolderModal(true)}>
+              + Folder
+            </button>
           </div>
           <div className="top-bar-section top-bar-center">
             <div className="view-tabs">
