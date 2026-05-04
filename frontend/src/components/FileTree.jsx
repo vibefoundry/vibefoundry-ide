@@ -1206,8 +1206,12 @@ const FileTree = ({
       for (const path of addedPaths) {
         const node = findNodeByPath(tree, path)
         if (node) {
-          // Never auto-expand into meta_data
-          if (!path.includes('/meta_data/') && !path.endsWith('/meta_data')) {
+          // Never auto-expand into meta_data or templates. Templates is
+          // a starter library — users open the folder manually if they
+          // want to inspect a template.
+          const inMetaData = path.includes('/meta_data/') || path.endsWith('/meta_data')
+          const inTemplates = path.includes('/templates/') || path.endsWith('/templates')
+          if (!inMetaData && !inTemplates) {
             expandToPath(path)
           }
           newNotifications.push({
@@ -1230,8 +1234,10 @@ const FileTree = ({
       for (const path of modifiedPaths) {
         const node = findNodeByPath(tree, path)
         if (node) {
-          // Never auto-expand into meta_data
-          if (!path.includes('/meta_data/') && !path.endsWith('/meta_data')) {
+          // Never auto-expand into meta_data or templates.
+          const inMetaData = path.includes('/meta_data/') || path.endsWith('/meta_data')
+          const inTemplates = path.includes('/templates/') || path.endsWith('/templates')
+          if (!inMetaData && !inTemplates) {
             expandToPath(path)
           }
           newNotifications.push({
