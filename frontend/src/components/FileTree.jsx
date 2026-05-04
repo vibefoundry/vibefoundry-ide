@@ -713,6 +713,17 @@ const FileTree = ({
   const onToggleExpand = useCallback((path) => {
     setExpandedPaths(prev => {
       const next = new Set(prev)
+      // Clear descendants on every toggle. Without this, expandToPath (called
+      // when files appear in the tree) leaves stale descendant entries in
+      // the set, so re-expanding a collapsed folder makes everything inside
+      // render expanded too. Standard file-explorer behavior is for collapse +
+      // re-expand to lose descendant state — match that.
+      const prefix = path + '/'
+      for (const p of Array.from(next)) {
+        if (p.startsWith(prefix)) {
+          next.delete(p)
+        }
+      }
       if (next.has(path)) {
         next.delete(path)
       } else {
