@@ -4173,9 +4173,9 @@ body {
   margin: 0;
 }
 
-/* Belt-and-suspenders: hide Clerk's development-mode footer + branding badge
-   even if a future SDK rev moves them out of the elements selectors above. */
-.signin-screen .cl-footer,
+/* Hide only Clerk's branding badge + the dev-mode warning. The footer
+   itself stays visible so the "Don't have an account? Sign up" link
+   continues to render — that lives inside .cl-footer too. */
 .signin-screen .cl-badge,
 .signin-screen [class*="developmentMode"],
 .signin-screen [data-localization-key*="development"] {
