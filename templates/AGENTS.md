@@ -102,14 +102,33 @@ The copied template is a starting application, not a final result. Preserve the 
 
 ### How to use a template
 
-1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, copy it. Don't build from scratch when a template fits.
-2. **Copy → scripts/, then rename.** `cp -r app_folder/templates/{template_name} app_folder/scripts/{appropriate_new_name}`. The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed.
+1. **Pick the right one.** If a template's shape (Track 1 pipeline, Track 2 PWA, etc.) matches the user's ask, use it as a guide. Don't build from scratch when a template fits.
+
+2. **How to "use" the template depends on which track:**
+
+   **Track 1 (Python pipelines) — DO NOT FORK.** Track 1 templates are *reference material only*. Read the template's `app.py` and `step*_*.py` to understand the pipeline pattern (numbered steps, durable Parquet checkpoints, `app.py` orchestrator, no launchers, no README). Then **write the new task from scratch** in `app_folder/scripts/{task_name}/`, following that pattern but with code specific to the user's data and goal. **Never `cp -r` a Track 1 template into `scripts/`** — Track 1 work is too task-specific for a literal copy to be useful, and copying drags template-isms (variable names, fake schemas, dummy logic) into production code.
+
+   **Track 2 (PWA) and Track 3 (Full-Stack) — fork the template, code only, no sample data.** These tracks ship a lot of operational plumbing (launcher scripts, build pipelines, port logic, package layout) that's worth preserving verbatim. Use one of these recipes to copy *only the code files*:
+   ```bash
+   # Option A: copy then drop sample_data
+   cp -r app_folder/templates/{template_name} app_folder/scripts/{appropriate_new_name}
+   rm -rf app_folder/scripts/{appropriate_new_name}/sample_data
+   ```
+   ```bash
+   # Option B: rsync with exclude (single command)
+   rsync -av --exclude='sample_data/' app_folder/templates/{template_name}/ app_folder/scripts/{appropriate_new_name}/
+   ```
+   The build/launcher scripts derive `APP_NAME` from the folder name automatically, so renaming the folder is usually all the rewiring needed. **Never carry the template's `sample_data/` into the new task folder** — real tasks must source data exclusively from `input_folder/`. (See "Template data is for examples only" below.)
+
 3. **Refactor to fit.** Update titles, schema, sample fallbacks, and any hardcoded strings to match the user's domain. Don't keep generic-template language in a real task.
+
 4. **Delete what doesn't fit.** If the template ships a feature the user didn't ask for (a chart, a pane, a step), **delete it** — don't leave it as dead weight. Fewer moving parts is better than carrying unused boilerplate.
 
 ### Template data is for examples only
 
 Templates ship synthetic `sample_data/` (and sometimes pre-staged files in `public/data/`) so they run out of the box. **Never use that data for any real analysis.** It's illustrative — the schemas are realistic, the values aren't.
+
+**When you fork a template into `app_folder/scripts/`, do not bring `sample_data/` with you.** Copy only the code files (Python, JS, HTML, configs, launcher scripts) — see step 2 above for the exact `rsync --exclude` / `rm -rf sample_data` recipes. The forked task should resolve its dataset from `input_folder/` on every run. Carrying the template's example data into a real task folder is how synthetic values end up in production outputs.
 
 Real data always comes from:
 - `input_folder/` (read-only source data — see the "Input Data Is Sacred" rule above)
