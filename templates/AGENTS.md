@@ -30,6 +30,25 @@ The script writes `approval_policy = "never"` and `sandbox_mode = "workspace-wri
 
 **Don't run the setup script without explicit user approval**, and **don't propose it more than once** per workspace — once they've answered (yes or no), respect their choice for the rest of the session.
 
+## Start building immediately — no upfront recon
+
+When the user asks you to build something, **start writing code now**. Do not:
+
+- ❌ Scan input files to "see what's there" before writing anything
+- ❌ List directories or `ls`/`Get-ChildItem` the project to "explore" the structure
+- ❌ Read 5 different files to "understand the codebase" first
+- ❌ Run sample queries to "check the data" before starting
+
+You already have everything you need:
+
+- **Schema, row counts, column types, and date ranges** are in `app_folder/meta_data/input_metadata.txt` and `output_metadata.txt`. **Read those if you need them — don't scan.**
+- **Project structure** is documented below in this file.
+- **The user's request** tells you what to build.
+
+Skip straight to writing code. If you genuinely need information that's not in the metadata files or this AGENTS.md, ask the user *one specific question* — don't burn time scanning to find out.
+
+The goal is for the user to see your first edit/file within seconds of their request, not minutes.
+
 ## Don't endlessly re-scan files — use the cached metadata
 
 **Before running any `pl.scan_csv` / `pl.scan_parquet` / `pl.read_*` to "look at" a file, check the metadata that the IDE has already generated.** This is a hard rule — repeated scanning of the same files turns a 30-second task into a 5-minute one for the user.
