@@ -8,10 +8,17 @@ import os
 import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Callable
 
 import polars as pl
+
+
+# Concurrency for chunk processing. Polars itself uses all cores within
+# each chunk, so 2-4 workers gives good pipelining (one chunk's I/O
+# overlaps another's compute) without thrashing the global thread pool.
+_PROFILE_WORKERS = min(4, max(2, (os.cpu_count() or 4) // 2))
 
 
 # --- Configuration ---
@@ -150,106 +157,88 @@ def profile_large_file(
     total_chunks = max(1, (total_rows + CHUNK_ROWS - 1) // CHUNK_ROWS)
 
     profile_path = get_profile_cache_path(project_folder, file_path)
-    # Ensure meta_data dir exists
     profile_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Clean up any previous temp profile
-    temp_profile_path = profile_path.with_suffix(".tmp.parquet")
-    if temp_profile_path.exists():
-        temp_profile_path.unlink()
-
-    # --- Stream chunks, append stats to disk ---
-    for chunk_idx in range(total_chunks):
+    def _process_chunk(chunk_idx: int) -> list[dict]:
+        """Compute per-column stats for a single chunk. Pure function — no
+        shared state, safe to call from multiple threads in parallel."""
         offset = chunk_idx * CHUNK_ROWS
         chunk_df = lf.slice(offset, CHUNK_ROWS).collect()
+        if len(chunk_df) == 0:
+            return []
 
-        rows_in_chunk = len(chunk_df)
-        if rows_in_chunk == 0:
-            if progress_callback:
-                progress_callback(chunk_idx + 1, total_chunks)
-            continue
-
-        # Build stats for this chunk
-        chunk_stats_rows = []
-
-        # Numeric columns: min, max, null_count
+        rows: list[dict] = []
         for col in numeric_cols:
             series = chunk_df[col]
             col_min = series.min()
             col_max = series.max()
-            null_count = series.null_count()
-            chunk_stats_rows.append({
+            rows.append({
                 "column": col,
                 "col_type": "numeric",
                 "cat_value": None,
                 "num_min": float(col_min) if col_min is not None else None,
                 "num_max": float(col_max) if col_max is not None else None,
-                "null_count": int(null_count),
+                "null_count": int(series.null_count()),
             })
 
-        # Categorical columns: unique values (capped), null_count
         for col in categorical_cols:
             series = chunk_df[col]
-            null_count = series.null_count()
+            null_count = int(series.null_count())
             try:
                 unique_vals = series.drop_nulls().cast(pl.Utf8).unique().to_list()
                 unique_vals = [str(v) for v in unique_vals if v != ""]
             except Exception:
                 unique_vals = []
 
-            # Write one row per unique value so we can dedup across chunks
-            for val in unique_vals:
-                chunk_stats_rows.append({
-                    "column": col,
-                    "col_type": "categorical",
-                    "cat_value": val,
-                    "num_min": None,
-                    "num_max": None,
-                    "null_count": int(null_count) if val == unique_vals[0] else 0,
-                })
-
-            # If no values, still record the column with null counts
-            if not unique_vals:
-                chunk_stats_rows.append({
+            if unique_vals:
+                # First row carries the chunk's null_count for this column;
+                # remaining unique-value rows have null_count=0 to avoid
+                # double-counting at aggregation time.
+                for i, val in enumerate(unique_vals):
+                    rows.append({
+                        "column": col,
+                        "col_type": "categorical",
+                        "cat_value": val,
+                        "num_min": None,
+                        "num_max": None,
+                        "null_count": null_count if i == 0 else 0,
+                    })
+            else:
+                rows.append({
                     "column": col,
                     "col_type": "categorical",
                     "cat_value": None,
                     "num_min": None,
                     "num_max": None,
-                    "null_count": int(null_count),
+                    "null_count": null_count,
                 })
 
-        # Free the chunk from memory immediately
-        del chunk_df
+        return rows
 
-        if chunk_stats_rows:
-            stats_df = pl.DataFrame(chunk_stats_rows)
+    # --- Process chunks in parallel; accumulate stats in memory ---
+    # Was: sequential for-loop + O(n^2) read-concat-write of a temp Parquet.
+    # Now: ThreadPoolExecutor pipelines chunks (Polars uses all cores within
+    # each), and per-chunk stats are tiny (~one row per column), so keeping
+    # them in memory is fine even for huge files.
+    all_stats_rows: list[dict] = []
+    completed = 0
+    with ThreadPoolExecutor(max_workers=_PROFILE_WORKERS) as executor:
+        futures = {executor.submit(_process_chunk, i): i for i in range(total_chunks)}
+        for future in as_completed(futures):
+            try:
+                all_stats_rows.extend(future.result())
+            except Exception as e:
+                print(f"[profile_large_file] chunk {futures[future]} failed: {e}")
+            completed += 1
+            if progress_callback:
+                progress_callback(completed, total_chunks)
 
-            # Append to temp Parquet on disk.
-            # memory_map=False is required on Windows: the default mmap stays
-            # alive through pl.concat, blocking the subsequent overwrite with
-            # OSError 1224 ("file with a user-mapped section open").
-            if temp_profile_path.exists():
-                existing = pl.read_parquet(temp_profile_path, memory_map=False)
-                combined = pl.concat([existing, stats_df]).rechunk()
-                del existing
-                combined.write_parquet(temp_profile_path)
-                del combined
-            else:
-                stats_df.write_parquet(temp_profile_path)
-            del stats_df
-
-        if progress_callback:
-            progress_callback(chunk_idx + 1, total_chunks)
-
-    # --- Final aggregation pass on the (small) temp profile Parquet ---
+    # --- Final aggregation pass over the in-memory stats ---
     profile_result = {"columns": {}, "total_rows": total_rows, "file_size": file_path.stat().st_size}
 
-    if temp_profile_path.exists():
-        # memory_map=False so the subsequent unlink() works on Windows.
-        raw = pl.read_parquet(temp_profile_path, memory_map=False)
+    if all_stats_rows:
+        raw = pl.DataFrame(all_stats_rows)
 
-        # Aggregate numeric columns
         for col in numeric_cols:
             col_data = raw.filter(
                 (pl.col("column") == col) & (pl.col("col_type") == "numeric")
@@ -268,7 +257,6 @@ def profile_large_file(
                     "null_count": 0, "high_cardinality": False,
                 }
 
-        # Aggregate categorical columns — dedup values across chunks
         for col in categorical_cols:
             col_data = raw.filter(
                 (pl.col("column") == col) & (pl.col("col_type") == "categorical")
@@ -287,10 +275,7 @@ def profile_large_file(
             }
 
         del raw
-        # Clean up temp file
-        temp_profile_path.unlink(missing_ok=True)
 
-    # Write final profile Parquet (small — just the aggregated stats)
     _write_final_profile(profile_path, profile_result)
     _save_profile_meta(profile_path, file_path, extra={
         "total_rows": total_rows,
