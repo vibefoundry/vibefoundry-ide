@@ -521,23 +521,34 @@ PUBLIC_TEMPLATE_FALLBACK_URL = "https://vibefoundry.ai/templates"
 
 
 async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
-    """Fetch templates/ from the private proxy using a Clerk JWT and write
-    them into dest_root. Returns the list of filenames written. Raises on
-    proxy errors so the caller can decide whether to fall back."""
+    """Recursively fetch templates/ (including subfolders) from the private
+    proxy using a Clerk JWT and write everything into dest_root. Subfolder
+    structure is preserved. Raises on proxy errors so the caller can decide
+    whether to fall back."""
     headers = {"Authorization": f"Bearer {jwt}"}
     written: list[str] = []
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        listing_res = await client.get(PROXY_BASE_URL, headers=headers)
-        listing_res.raise_for_status()
-        entries = listing_res.json()
-        for entry in entries:
-            if entry.get("type") != "file":
-                continue
-            name = entry["name"]
-            file_res = await client.get(f"{PROXY_BASE_URL}/{name}", headers=headers)
-            file_res.raise_for_status()
-            (dest_root / name).write_bytes(file_res.content)
-            written.append(name)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        async def fetch_dir(rel_path: str = "") -> None:
+            url = f"{PROXY_BASE_URL}/{rel_path}" if rel_path else PROXY_BASE_URL
+            listing_res = await client.get(url, headers=headers)
+            listing_res.raise_for_status()
+            entries = listing_res.json()
+            for entry in entries:
+                name = entry["name"]
+                entry_rel = f"{rel_path}/{name}" if rel_path else name
+                if entry.get("type") == "dir":
+                    (dest_root / entry_rel).mkdir(parents=True, exist_ok=True)
+                    await fetch_dir(entry_rel)
+                elif entry.get("type") == "file":
+                    file_res = await client.get(f"{PROXY_BASE_URL}/{entry_rel}", headers=headers)
+                    file_res.raise_for_status()
+                    local_path = dest_root / entry_rel
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    local_path.write_bytes(file_res.content)
+                    written.append(entry_rel)
+
+        await fetch_dir()
     return written
 
 
