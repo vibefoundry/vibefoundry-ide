@@ -1,9 +1,11 @@
-import Supercluster from "supercluster";
-import "../css/styles.css";
+// React, ReactDOM, Supercluster, L (Leaflet), and duckdb are all loaded
+// as UMD globals via <script> tags in index.html — no bundler involved.
+// styles.css is loaded via <link rel="stylesheet"> in index.html.
 
 (function () {
   "use strict";
 
+  var Supercluster = window.Supercluster;
   var h = React.createElement;
   var useEffect = React.useEffect;
   var useMemo = React.useMemo;

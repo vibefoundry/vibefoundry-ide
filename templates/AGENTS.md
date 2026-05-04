@@ -146,7 +146,7 @@ If you've picked **Track 2 or Track 3** and there's a matching template under `a
 
 `CUSTOMIZE.md` is a 5-step recipe — what to copy, the ONE file you need to edit, and an explicit list of what NOT to touch. Following it cuts customization from minutes to ~30 seconds.
 
-**Do not** open `app.js`, the `prepare_dev_assets.py`, the `vite.config.js`, or any other file in the template before reading `CUSTOMIZE.md`. The recipe will tell you which (usually only `app_config.json`) actually needs editing.
+**Do not** open `app.js`, `prepare_dev_assets.py`, `serve_dev.py`, or any other file in the template before reading `CUSTOMIZE.md`. The recipe will tell you which (usually only `app_config.json`) actually needs editing.
 
 For **Track 1**, there's no fork and no `CUSTOMIZE.md` — read the template's `app.py` for pattern reference, then write the new task from scratch (per the "How to use a template" section below).
 
@@ -242,7 +242,7 @@ The copied template is a starting application, not a final result. Preserve the 
 
 ### When the template's features don't quite match the user's request
 
-This is the most common case — the template's chassis (Vite, launchers, port logic, DuckDB-WASM, package layout, build pipeline) fits, but the specific features (chart types, columns, filters, layout) need to differ. Two rules:
+This is the most common case — the template's chassis (launchers, port logic, DuckDB-WASM, UMD lib staging, package layout, build pipeline) fits, but the specific features (chart types, columns, filters, layout) need to differ. Two rules:
 
 - **If the chassis fits but the features don't, fork anyway and replace the feature code.** The chassis is the thing that's expensive to rebuild — it's 3-5+ minutes of operational plumbing that's identical for every dashboard. The feature code is 10-50 lines per chart/filter/KPI and is meant to be swapped. Don't fresh-write a new app to avoid an 80% match — you'll spend 5 minutes re-implementing chassis you'd be deleting from the template anyway.
 

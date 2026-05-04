@@ -24,7 +24,7 @@ Copy-Item -Recurse app_folder\templates\geo_dashboard app_folder\scripts\{your_t
 Remove-Item -Recurse -Force app_folder\scripts\{your_task_name}\app_core\sample_data, app_folder\scripts\{your_task_name}\app_core\node_modules, app_folder\scripts\{your_task_name}\app_core\dist -ErrorAction SilentlyContinue
 ```
 
-## Step 3 — Edit ONE file: `app_core/src_app/public/data/app_config.json`
+## Step 3 — Edit ONE file: `app_core/src_app/data/app_config.json`
 
 This is the **only file you need to edit for most customizations**. Replace the values based on the user's metadata:
 
@@ -51,7 +51,7 @@ This is the **only file you need to edit for most customizations**. Replace the 
 
 ## Step 4 — Edit `manifest.json` (one line)
 
-`app_core/src_app/public/data/manifest.json` — update `displayName` to match the user's domain (e.g., "Q3 Restaurant Distribution").
+`app_core/src_app/data/manifest.json` — update `displayName` to match the user's domain (e.g., "Q3 Restaurant Distribution").
 
 ## Step 5 — Run it
 

@@ -1,10 +1,11 @@
-import "chart.js/auto";
-import { Chart } from "chart.js/auto";
-import "../css/styles.css";
+// React, ReactDOM, Chart.js, and duckdb are all loaded as UMD globals
+// via <script> tags in index.html — no bundler involved.
+// styles.css is loaded via <link rel="stylesheet"> in index.html.
 
 (function () {
   "use strict";
 
+  var Chart = window.Chart;
   var h = React.createElement;
   var useEffect = React.useEffect;
   var useMemo = React.useMemo;

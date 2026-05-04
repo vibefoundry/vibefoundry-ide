@@ -25,7 +25,7 @@ Copy-Item -Recurse app_folder\templates\trend_analytics_dashboard app_folder\scr
 Remove-Item -Recurse -Force app_folder\scripts\{your_task_name}\app_core\sample_data, app_folder\scripts\{your_task_name}\app_core\node_modules, app_folder\scripts\{your_task_name}\app_core\dist -ErrorAction SilentlyContinue
 ```
 
-## Step 3 — Edit ONE file: `app_core/src_app/public/data/app_config.json`
+## Step 3 — Edit ONE file: `app_core/src_app/data/app_config.json`
 
 Most customizations only need this one file. Replace the values based on the user's metadata:
 
@@ -52,7 +52,7 @@ Most customizations only need this one file. Replace the values based on the use
 
 ## Step 4 — Edit `manifest.json` (one line)
 
-`app_core/src_app/public/data/manifest.json` — update `displayName` to match the user's domain (e.g., "Monthly Sales by Channel — 2024-2026").
+`app_core/src_app/data/manifest.json` — update `displayName` to match the user's domain (e.g., "Monthly Sales by Channel — 2024-2026").
 
 ## Step 5 — Run it
 

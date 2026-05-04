@@ -1,29 +1,30 @@
 """
-Builds the geo_dashboard PWA into a Track 2 distributable package at
-output_folder/geo_dashboard/. Reuses the dev-asset prep flow, runs the Vite
-production build, then assembles the launcher trio plus application_files/.
+Build the geo_dashboard PWA into a Track 2 distributable package at
+output_folder/geo_dashboard/.
+
+Plain-script architecture — no Vite, no npm. Re-uses the dev-asset
+prep flow (which downloads UMDs and stages data), then copies the
+src_app/ tree as-is into the package's application_files/ directory.
+The package's launcher trio (pc_start.bat, mac_start.command, mac_start.sh)
+serves application_files/ via a static HTTP server on the recipient's
+machine.
 """
 import os
 import shutil
-import subprocess
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 OUTPUT_FOLDER = os.path.join(PROJECT_DIR, "output_folder")
 APP_CORE_DIR = os.path.join(SCRIPT_DIR, "app_core")
+SRC_APP_DIR = os.path.join(APP_CORE_DIR, "src_app")
 
 sys.path.insert(0, APP_CORE_DIR)
-
-from prepare_dev_assets import prepare_dev_assets
+from prepare_dev_assets import prepare_dev_assets  # noqa: E402
 
 APP_NAME = os.path.basename(SCRIPT_DIR)
 PACKAGE_DIR = os.path.join(OUTPUT_FOLDER, APP_NAME)
 APP_FILES = os.path.join(PACKAGE_DIR, "application_files")
-
-APP_SOURCE_DIR = os.path.join(APP_CORE_DIR, "src_app")
-# Vite's outDir is "../dist" relative to root="src_app", so dist lands inside app_core/.
-DIST_DIR = os.path.join(APP_CORE_DIR, "dist")
 
 
 def banner(msg):
@@ -31,32 +32,16 @@ def banner(msg):
     print(f"\n{line}\n {msg}\n{line}")
 
 
-def run(cmd, cwd):
-    print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
-
-
-def vite_build():
-    if os.path.exists(DIST_DIR):
-        shutil.rmtree(DIST_DIR)
-    run(["npm", "run", "build"], cwd=APP_CORE_DIR)
-
-
 def assemble_package():
+    """Wipe the output package, then copy src_app/ into application_files/."""
     if os.path.exists(PACKAGE_DIR):
         shutil.rmtree(PACKAGE_DIR)
-    os.makedirs(APP_FILES, exist_ok=True)
+    os.makedirs(PACKAGE_DIR, exist_ok=True)
 
-    # Copy Vite build output into application_files/
-    for entry in os.listdir(DIST_DIR):
-        src = os.path.join(DIST_DIR, entry)
-        dst = os.path.join(APP_FILES, entry)
-        if os.path.isdir(src):
-            shutil.copytree(src, dst)
-        else:
-            shutil.copy2(src, dst)
+    # Copy the entire src_app/ tree (HTML, JS, CSS, lib/, data/) into
+    # application_files/. No bundling — the recipient's HTTP server
+    # serves these files raw.
+    shutil.copytree(SRC_APP_DIR, APP_FILES)
 
     write_serve_ps1(os.path.join(APP_FILES, "serve.ps1"))
     write_pc_start(os.path.join(PACKAGE_DIR, "pc_start.bat"))
@@ -67,7 +52,9 @@ def assemble_package():
 
 
 def write_serve_ps1(path):
-    content = r"""# PowerShell static HTTP server for the Outlet Geo Dashboard PWA.
+    """PowerShell static HTTP server. Sets COOP/COEP for DuckDB-WASM
+    SharedArrayBuffer threading."""
+    content = r"""# PowerShell static HTTP server for the Geo Dashboard PWA.
 $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $probe.Start()
 $port = $probe.LocalEndpoint.Port
@@ -103,6 +90,10 @@ try {
     $rel = $ctx.Request.Url.AbsolutePath.TrimStart('/')
     if ([string]::IsNullOrEmpty($rel)) { $rel = "index.html" }
     $file = Join-Path $root $rel
+    # Headers needed for DuckDB-WASM SharedArrayBuffer
+    $ctx.Response.Headers.Add("Cross-Origin-Opener-Policy", "same-origin")
+    $ctx.Response.Headers.Add("Cross-Origin-Embedder-Policy", "require-corp")
+    $ctx.Response.Headers.Add("Cache-Control", "no-store")
     if (Test-Path $file -PathType Leaf) {
       $ext = [System.IO.Path]::GetExtension($file).ToLower()
       $ctx.Response.ContentType = $mime[$ext]
@@ -126,7 +117,7 @@ try {
 def write_pc_start(path):
     content = r"""@echo off
 echo ========================================
-echo  Outlet Geo Dashboard
+echo  Geo Dashboard
 echo ========================================
 echo.
 echo Starting server on an available port...
@@ -140,6 +131,9 @@ powershell -ExecutionPolicy Bypass -File "serve.ps1"
 
 
 def write_mac_start(path):
+    """Mac launcher — strips quarantine on first launch, picks a free
+    port, then runs python3's http.server with COOP/COEP via a tiny
+    custom handler."""
     content = r"""#!/bin/bash
 PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -148,33 +142,57 @@ xattr -dr com.apple.quarantine "$PACKAGE_DIR" 2>/dev/null
 
 cd "$PACKAGE_DIR/application_files"
 echo "========================================"
-echo " Outlet Geo Dashboard"
+echo " Geo Dashboard"
 echo "========================================"
 echo ""
-PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1]); s.close()")
-echo "Starting on http://localhost:$PORT"
-echo "Press Ctrl+C to stop."
-echo ""
-open "http://localhost:$PORT"
-python3 -m http.server "$PORT"
+
+# Use a small inline Python server that adds the COOP/COEP headers
+# DuckDB-WASM needs for SharedArrayBuffer threading.
+python3 - <<'PY'
+import http.server, socket, socketserver, threading, time, webbrowser
+
+class H(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".wasm": "application/wasm",
+        ".js":   "application/javascript",
+        ".mjs":  "application/javascript",
+        ".css":  "text/css",
+        ".json": "application/json",
+        ".parquet": "application/octet-stream",
+        ".geojson": "application/json",
+    }
+    def end_headers(self):
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+    def log_message(self, *a, **k): pass
+
+s = socket.socket(); s.bind(("",0)); port = s.getsockname()[1]; s.close()
+url = f"http://localhost:{port}/"
+print(f"Serving on {url}")
+print("Press Ctrl+C to stop.")
+threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+with socketserver.TCPServer(("", port), H) as httpd:
+    try: httpd.serve_forever()
+    except KeyboardInterrupt: print("\nStopping.")
+PY
 """
     with open(path, "w") as f:
         f.write(content)
 
 
 def main():
-    banner("Outlet Geo Dashboard — build_app_package")
+    banner("Geo Dashboard — build_app_package")
     print(f"App:     {APP_NAME}")
     print(f"Package: {PACKAGE_DIR}")
     print()
 
-    banner("[1/3] Prepare dev assets")
+    banner("[1/2] Prepare dev assets (download UMDs, stage data)")
     prepare_dev_assets()
 
-    banner("[2/3] Vite build")
-    vite_build()
-
-    banner("[3/3] Assemble distributable package")
+    banner("[2/2] Assemble distributable package")
     assemble_package()
 
     banner("Done")
