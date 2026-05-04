@@ -4,12 +4,14 @@ You are working in the project root with full access to all project files includ
 
 ## Shell commands — match the host OS
 
-**Detect the host OS before running shell commands and use the native syntax for that platform.** Quick check: `uname -s` returns `Darwin` (macOS), `Linux`, or fails on Windows.
+**Detect the host OS before running shell commands and use the native syntax for that platform.** Users may be on macOS, Linux, or Windows. Quick check: `uname -s` returns `Darwin` (macOS) or `Linux`, and fails on Windows PowerShell — `$IsWindows` returns `True` in PowerShell.
 
-- **macOS / Linux** (zsh, bash): use Unix commands — `ls`, `cp -r`, `rm -rf`, `mkdir -p`, `find`, `mv`, `cat`, `grep`, etc.
-- **Windows** (PowerShell): use PowerShell cmdlets — `Get-ChildItem`, `Copy-Item -Recurse`, `Remove-Item -Recurse -Force`, `New-Item -ItemType Directory`.
+| Host | Shell | Use these |
+|------|-------|-----------|
+| **macOS / Linux** | zsh, bash | `ls`, `cp -r`, `rm -rf`, `mkdir -p`, `find`, `mv`, `cat`, `grep`, `chmod +x` |
+| **Windows** | PowerShell | `Get-ChildItem`, `Copy-Item -Recurse`, `Remove-Item -Recurse -Force`, `New-Item -ItemType Directory`, `Move-Item`, `Get-Content`, `Select-String` |
 
-**Do not default to PowerShell on macOS or Linux.** Running `Get-ChildItem` on a Unix host will fail with "command not found" — always pick the shell that matches the user's environment.
+**Don't mix shells.** `Get-ChildItem` fails on macOS/Linux with "command not found"; `ls -la` and `rm -rf` fail in raw PowerShell. Always pick the shell that matches the user's environment, and prefer cross-platform tools (e.g., `python -c "..."`, `git`, `npm`) when the same job can be done identically on every platform.
 
 ## When to Plan vs. Just Do It
 
