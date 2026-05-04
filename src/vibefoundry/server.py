@@ -7,9 +7,12 @@ import sys
 import json
 import math
 import asyncio
+import base64
+import secrets
 import struct
 import signal
 import time
+import urllib.parse
 from pathlib import Path
 
 
@@ -57,7 +60,7 @@ import polars as pl
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -518,6 +521,166 @@ async def get_folder_info():
 
 PROXY_BASE_URL = "https://vibefoundry.ai/api/templates"
 PUBLIC_TEMPLATE_FALLBACK_URL = "https://vibefoundry.ai/templates"
+AUTH_LANDING_URL = "https://vibefoundry.ai/ide-auth"
+
+
+# --- IDE auth (delegated Clerk Production via vibefoundry.ai) -----------------
+#
+# The IDE runs on http://127.0.0.1:<port>, which Clerk Production refuses to
+# talk to. So sign-in is delegated: the IDE opens a browser to
+#   https://vibefoundry.ai/ide-auth?state=<csrf>&callback=http://127.0.0.1:<port>/auth/callback
+# the user signs in via Clerk Production there, the website mints a custom
+# HMAC JWT and redirects back to the localhost callback below, which stores
+# the token. Subsequent /api/build calls read the token off disk and pass
+# it to the templates proxy on vibefoundry.ai.
+
+# In-memory CSRF store: maps state nonce → unix-ts expiry. Cleaned lazily.
+_pending_auth_states: dict[str, float] = {}
+_AUTH_STATE_TTL_SECONDS = 600  # 10 minutes
+
+
+def _auth_token_path() -> Path:
+    home = Path.home() / ".vibefoundry"
+    home.mkdir(parents=True, exist_ok=True)
+    return home / "auth.json"
+
+
+def _read_stored_token() -> Optional[dict]:
+    """Returns {"token": str, "sub": str, "email": str|None, "expiresAt": int}
+    or None if no stored token / expired / unreadable."""
+    path = _auth_token_path()
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    expires_at = data.get("expiresAt", 0)
+    if not isinstance(expires_at, (int, float)) or expires_at < time.time():
+        return None
+    if not data.get("token"):
+        return None
+    return data
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode a JWT payload WITHOUT verifying the signature. The IDE
+    doesn't have IDE_AUTH_SECRET (only the proxy does), so we trust the
+    token blindly here. The proxy validates on every request."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+        return json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def _purge_expired_auth_states() -> None:
+    now = time.time()
+    expired = [s for s, exp in _pending_auth_states.items() if exp < now]
+    for s in expired:
+        _pending_auth_states.pop(s, None)
+
+
+@app.post("/api/auth/start")
+async def auth_start(request: Request):
+    """Generate a CSRF state and the URL the IDE should open in the browser."""
+    _purge_expired_auth_states()
+    state_nonce = secrets.token_urlsafe(32)
+    _pending_auth_states[state_nonce] = time.time() + _AUTH_STATE_TTL_SECONDS
+
+    host = request.headers.get("host", "127.0.0.1:8765")
+    callback_url = f"http://{host}/auth/callback"
+    encoded_callback = urllib.parse.quote(callback_url, safe="")
+
+    auth_url = (
+        f"{AUTH_LANDING_URL}"
+        f"?state={state_nonce}"
+        f"&callback={encoded_callback}"
+    )
+    return {"url": auth_url}
+
+
+@app.get("/auth/callback")
+async def auth_callback(token: str = "", state: str = ""):
+    """Receives the redirect from vibefoundry.ai/ide-auth with token+state.
+    Validates state (CSRF), stores token to disk, returns an HTML page."""
+    if not token or not state:
+        return HTMLResponse(_auth_callback_html(error="Missing token or state in callback URL."), status_code=400)
+
+    _purge_expired_auth_states()
+    if state not in _pending_auth_states:
+        return HTMLResponse(_auth_callback_html(error="Invalid or expired sign-in attempt. Try again from the IDE."), status_code=400)
+    _pending_auth_states.pop(state, None)
+
+    payload = _decode_jwt_payload(token)
+    expires_at = int(payload.get("exp", 0))
+    if expires_at < time.time():
+        return HTMLResponse(_auth_callback_html(error="Token already expired."), status_code=400)
+
+    record = {
+        "token": token,
+        "sub": payload.get("sub"),
+        "email": payload.get("email"),
+        "expiresAt": expires_at,
+    }
+    _auth_token_path().write_text(json.dumps(record), encoding="utf-8")
+    return HTMLResponse(_auth_callback_html())
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Read-only — frontend polls this to know if user is signed in."""
+    record = _read_stored_token()
+    if not record:
+        return {"signedIn": False}
+    return {
+        "signedIn": True,
+        "user": {"sub": record.get("sub"), "email": record.get("email")},
+        "expiresAt": record.get("expiresAt"),
+    }
+
+
+@app.post("/api/auth/sign-out")
+async def auth_sign_out():
+    """Delete the stored token."""
+    path = _auth_token_path()
+    if path.exists():
+        path.unlink()
+    return {"signedIn": False}
+
+
+def _auth_callback_html(error: str = "") -> str:
+    if error:
+        body = f'<p class="msg" style="color:#dc2626">{error}</p>'
+    else:
+        body = (
+            '<p class="msg">You can close this tab and return to the VibeFoundry IDE.</p>'
+            '<script>setTimeout(() => { try { window.close() } catch (e) {} }, 1500)</script>'
+        )
+    return f"""<!doctype html>
+<html><head><title>VibeFoundry — Sign-in complete</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #ffffff;
+         background-image: linear-gradient(rgba(37,99,235,0.11) 1px, transparent 1px),
+                           linear-gradient(90deg, rgba(37,99,235,0.11) 1px, transparent 1px);
+         background-size: 32px 32px;
+         display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; }}
+  .card {{ background: rgba(219,234,254,0.30); padding: 40px 56px;
+           border: 1px solid rgba(147,197,253,0.5); border-radius: 12px;
+           text-align: center; max-width: 460px; }}
+  h1 {{ font-size: 22px; color: #0f172a; margin: 0 0 12px; }}
+  .msg {{ font-size: 14px; color: #475569; margin: 0; }}
+</style></head>
+<body><div class="card"><h1>{'Sign-in failed' if error else 'Signed in!'}</h1>{body}</div></body></html>
+"""
+
+
+# --- Templates proxy + Build endpoint ----------------------------------------
 
 
 async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
@@ -553,7 +716,7 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
 
 
 @app.post("/api/build")
-async def build_project(request: Request):
+async def build_project():
     """Build the project structure - creates folders and pulls templates."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -561,10 +724,11 @@ async def build_project(request: Request):
     # Create folder structure
     folders = setup_project_structure(state.project_folder)
 
-    # Pull templates: try the authenticated proxy first if we have a JWT,
-    # then fall back to the public website cascade for unauthenticated users.
-    auth_header = request.headers.get("authorization", "")
-    jwt = auth_header.split(" ", 1)[1].strip() if auth_header.lower().startswith("bearer ") else ""
+    # Pull templates: try the authenticated proxy first if we have a stored
+    # IDE auth token, then fall back to the public website cascade for
+    # unauthenticated users.
+    stored = _read_stored_token()
+    jwt = stored["token"] if stored else ""
     templates_written: list[str] = []
 
     # Templates land inside app_folder/templates/ — keeps starter content

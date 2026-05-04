@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { SignedIn, SignedOut, SignIn, useAuth, useUser, useClerk } from '@clerk/clerk-react'
 import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
@@ -11,18 +10,49 @@ import {
 import './App.css'
 
 function App() {
-  const { getToken } = useAuth()
-  const { isSignedIn } = useUser()
-  const { signOut } = useClerk()
   const [skipAuth, setSkipAuth] = useState(() => localStorage.getItem('vf_skip_auth') === '1')
+  // authStatus.signedIn drives the gate; polled from /api/auth/status which
+  // reads ~/.vibefoundry/auth.json. Token is stored server-side, never in
+  // the frontend.
+  const [authStatus, setAuthStatus] = useState({ signedIn: false, loading: true })
+
+  // Poll auth status every 2s so when the browser sign-in flow completes
+  // and writes the token to disk, the IDE picks it up automatically.
+  useEffect(() => {
+    let cancelled = false
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('/api/auth/status')
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled) setAuthStatus({ ...data, loading: false })
+      } catch {
+        if (!cancelled) setAuthStatus({ signedIn: false, loading: false })
+      }
+    }
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 2000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [])
 
   const handleAuthToggle = async () => {
-    if (isSignedIn) {
-      await signOut()
+    if (authStatus.signedIn) {
+      await fetch('/api/auth/sign-out', { method: 'POST' })
+      setAuthStatus({ signedIn: false, loading: false })
     }
     localStorage.removeItem('vf_skip_auth')
     setSkipAuth(false)
   }
+
+  const startSignIn = async () => {
+    const res = await fetch('/api/auth/start', { method: 'POST' })
+    if (!res.ok) return
+    const { url } = await res.json()
+    window.open(url, '_blank', 'noopener')
+  }
+
+  const isSignedIn = authStatus.signedIn
+
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileContent, setFileContent] = useState(null)
@@ -558,22 +588,18 @@ function App() {
     }
   }, [projectPath])
 
-  // Build project structure - creates folders and pulls templates via the proxy
+  // Build project structure - creates folders and pulls templates via the proxy.
+  // The backend reads the IDE auth token off disk (~/.vibefoundry/auth.json)
+  // so the frontend doesn't need to pass anything.
   const handleBuildProject = async () => {
     if (!projectPath || !canWrite) return
 
     setIsScaffolding(true)
-
     try {
-      // Grab the Clerk session JWT so the backend can authenticate against
-      // the templates proxy on vibefoundry.ai. If signed out, getToken()
-      // returns null — the backend falls back to the public template path.
-      const token = await getToken().catch(() => null)
-
-      const headers = { 'Content-Type': 'application/json' }
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
-      const res = await fetch('/api/build', { method: 'POST', headers })
+      const res = await fetch('/api/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
       if (!res.ok) {
         throw new Error('Build failed')
       }
@@ -685,69 +711,22 @@ function App() {
 
   const renderSignInGate = () => (
     <div className="signin-screen">
-      <SignIn
-        routing="virtual"
-        appearance={{
-          layout: {
-            logoImageUrl: '/vf_logo.png',
-            logoPlacement: 'inside',
-          },
-          variables: {
-            colorBackground: '#dbeafe',
-            colorText: '#0f172a',
-            colorTextSecondary: '#1e3a8a',
-            colorPrimary: '#2563eb',
-            colorInputBackground: '#ffffff',
-            colorInputText: '#0f172a',
-            borderRadius: '8px',
-          },
-          elements: {
-            rootBox: { width: '380px' },
-            card: {
-              background: 'rgba(219, 234, 254, 0.16)',
-              backdropFilter: 'blur(1px)',
-              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.10)',
-              border: '1px solid rgba(147, 197, 253, 0.5)',
-              padding: '0 28px 24px 28px',
-              overflow: 'hidden',
-            },
-            // Banner = just the logo box, bled to card edges. Translucent
-            // light purple so the single page-background grid shows
-            // through — no independent grid on the banner or card body.
-            logoBox: {
-              background: 'rgba(30, 64, 175, 0.62)',
-              margin: '0 -28px 16px -28px',
-              padding: '40px 0',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '12px',
-            },
-            logoImage: { height: '94px', width: 'auto', filter: 'brightness(0) invert(1)' },
-            header: {
-              background: 'transparent',
-              margin: '0 0 12px 0',
-              padding: '0',
-              textAlign: 'center',
-            },
-            headerTitle: { color: '#0f172a', fontSize: '17px', fontWeight: '600', margin: '0' },
-            headerSubtitle: { display: 'none' },
-            // Tighten the form column — Clerk's defaults leave a lot of vertical air.
-            main: { gap: '12px' },
-            form: { gap: '12px' },
-            formFieldRow: { margin: '0' },
-            formField: { margin: '0' },
-            formFieldLabel: { display: 'none' },
-            formButtonPrimary: { marginTop: '4px' },
-            // Keep the footer visible so the "Don't have an account?
-            // Sign up" link renders, but hide the Clerk branding badge
-            // and the dev-mode warning that also live in the footer.
-            footer: { background: 'transparent' },
-            footerAction: { background: 'transparent' },
-            badge: { display: 'none' },
-          },
-        }}
-      />
+      <div className="signin-card-custom">
+        <div className="signin-card-banner">
+          <img src="/vf_logo.png" alt="" className="signin-banner-logo" />
+          <div className="signin-banner-title">VibeFoundry</div>
+        </div>
+        <div className="signin-card-body">
+          <h2 className="signin-body-title">Sign In For VibeFoundry Premium</h2>
+          <p className="signin-body-msg">
+            We'll open a browser tab for you to sign in. Once done, you'll be
+            returned here automatically.
+          </p>
+          <button className="signin-button" onClick={startSignIn}>
+            Sign in to VibeFoundry
+          </button>
+        </div>
+      </div>
       <button
         className="signin-skip"
         onClick={() => {
@@ -1088,13 +1067,9 @@ function App() {
   )
 
   if (skipAuth) return ideContent
-
-  return (
-    <>
-      <SignedOut>{renderSignInGate()}</SignedOut>
-      <SignedIn>{ideContent}</SignedIn>
-    </>
-  )
+  if (authStatus.loading) return null
+  if (authStatus.signedIn) return ideContent
+  return renderSignInGate()
 }
 
 export default App
