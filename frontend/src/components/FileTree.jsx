@@ -513,13 +513,13 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2.5a2 2 0 0 1-2-2V3.87z"/>
                 </svg>
-                New Folder
+                Add Folder
               </div>
               <div className="context-menu-item" onClick={() => onAction('newFile', node)}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
                 </svg>
-                New File
+                Add File
               </div>
               <div className="context-menu-divider" />
             </>

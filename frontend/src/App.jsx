@@ -11,10 +11,11 @@ import './App.css'
 
 function App() {
   const [skipAuth, setSkipAuth] = useState(() => localStorage.getItem('vf_skip_auth') === '1')
-  // authStatus.signedIn drives the gate; polled from /api/auth/status which
-  // reads ~/.vibefoundry/auth.json. Token is stored server-side, never in
-  // the frontend.
   const [authStatus, setAuthStatus] = useState({ signedIn: false, loading: true })
+  // Shown briefly after a fresh sign-in completes — gives the user a
+  // confirmation moment before the IDE renders. Triggered by the
+  // localStorage 'vf_signin_pending' flag set when startSignIn runs.
+  const [showSignedInModal, setShowSignedInModal] = useState(false)
 
   // Poll auth status every 2s so when the browser sign-in flow completes
   // and writes the token to disk, the IDE picks it up automatically.
@@ -25,7 +26,15 @@ function App() {
         const res = await fetch('/api/auth/status')
         if (!res.ok) return
         const data = await res.json()
-        if (!cancelled) setAuthStatus({ ...data, loading: false })
+        if (!cancelled) {
+          setAuthStatus({ ...data, loading: false })
+          // If a sign-in flow was just kicked off and we're now signed in,
+          // show the confirmation modal once and clear the pending flag.
+          if (data.signedIn && localStorage.getItem('vf_signin_pending') === '1') {
+            localStorage.removeItem('vf_signin_pending')
+            setShowSignedInModal(true)
+          }
+        }
       } catch {
         if (!cancelled) setAuthStatus({ signedIn: false, loading: false })
       }
@@ -41,6 +50,7 @@ function App() {
       setAuthStatus({ signedIn: false, loading: false })
     }
     localStorage.removeItem('vf_skip_auth')
+    localStorage.removeItem('vf_signin_pending')
     setSkipAuth(false)
   }
 
@@ -48,6 +58,9 @@ function App() {
     const res = await fetch('/api/auth/start', { method: 'POST' })
     if (!res.ok) return
     const { url } = await res.json()
+    // Mark that a sign-in is in flight; the auth-status poller picks this up
+    // and shows the confirmation modal when status flips to signed-in.
+    localStorage.setItem('vf_signin_pending', '1')
     window.open(url, '_blank', 'noopener')
   }
 
@@ -753,9 +766,6 @@ function App() {
             <button className="btn-flat" onClick={() => setShowBuildModal(true)}>
               Build
             </button>
-            <button className="btn-flat" onClick={() => setShowNewFolderModal(true)}>
-              + Folder
-            </button>
           </div>
           <div className="top-bar-section top-bar-center">
             <div className="view-tabs">
@@ -1008,6 +1018,24 @@ function App() {
               </button>
               <button className="btn-primary" onClick={handleBuildProject} disabled={isScaffolding}>
                 {isScaffolding ? 'Building...' : 'Build'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSignedInModal && (
+        <div className="modal-overlay" onClick={() => setShowSignedInModal(false)}>
+          <div className="modal signed-in-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Signed In!</h3>
+            </div>
+            <div className="modal-body">
+              <p>You're signed in to VibeFoundry. Click below to continue into the IDE.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-primary" onClick={() => setShowSignedInModal(false)} autoFocus>
+                Click Here to Continue
               </button>
             </div>
           </div>
