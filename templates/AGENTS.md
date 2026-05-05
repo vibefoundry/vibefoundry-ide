@@ -88,6 +88,19 @@ If you need to start a new app from a template, **fork it**: copy the relevant s
 
 The IDE keeps `templates/` collapsed in the file tree by design — open it only to look, never to type. Anything that lands inside that folder during a session is reference material, not work product.
 
+## Stay In Scope — Do What Was Asked, Nothing Else
+
+**Don't add features the user didn't ask for. Don't make aesthetic changes the user didn't ask for. Don't make "defensive" fixes the user didn't ask for.** If the request was "build me a PWA for FY26 data," the deliverable is a PWA fit to FY26 data — not a PWA *plus* a redesigned table, *plus* a CSV export button, *plus* a tweak to how nulls render in numeric columns, *plus* a refactor of the build script.
+
+Things you should not do unprompted:
+
+- **No aesthetic edits** — CSS, layout, colors, typography, spacing. The template already looks fine.
+- **No feature additions** — extra columns, summary widgets, charts, export buttons, search bars, empty-state messages.
+- **No defensive cleanup** — null guards, error boundaries, retry logic, "just in case" branches around code that already works.
+- **No refactors** — renaming variables, restructuring functions, extracting helpers, "improving" code you weren't asked to change.
+
+If you notice something you think could be better, ignore the thought. The user will ask if they want it. The biggest single source of agent-driven slowness is editing files outside the actual ask. Ship the smaller change.
+
 ---
 
 # Track 1: Python Scripts (Data Processing)
@@ -586,6 +599,12 @@ That's it for Track 1 — no `setup.sh`/`clear_cache.sh` needed since there are 
 **Use this track when the user wants:** an interactive dashboard or data explorer that ships as a zip-and-share folder and runs entirely in the user's browser. No Python or Node.js on the user's machine — just a browser and a tiny local HTTP server that serves static files.
 
 These apps are distributed as folders users launch with a `.bat` (Windows) or `.command` (Mac) file. No IT involvement required on the user's machine.
+
+## ⚠️ Read `templates/pwa_duckdb/CUSTOMIZE.md` first — that's your recipe.
+
+**Don't build a Track 2 PWA from scratch.** A complete, working DuckDB-WASM + React PWA template is already cascaded into your project at `templates/pwa_duckdb/`. Your job for any Track 2 task is to *clone it* into `app_folder/scripts/{task_name}/`, swap in the user's data, rewrite `app_config.json`, and stop. The full step-by-step lives in `templates/pwa_duckdb/CUSTOMIZE.md` — read that file before doing anything else. It tells you exactly which files to edit, which not to touch, and which inspection queries to run.
+
+The rest of this Track 2 section (architecture overview, build script template, JS patterns, launcher details) is *reference material* — read it only if `CUSTOMIZE.md` doesn't answer a specific question. **Do not use the build-from-scratch instructions below to recreate what the template already provides.** Skipping the recipe and rewriting the template files (the build script, the launchers, `app.js`, `js/app.js`'s rendering logic) is the single biggest cause of Track 2 tasks blowing past their time budget.
 
 ## Architecture (PWA)
 
