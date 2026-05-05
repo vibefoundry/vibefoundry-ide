@@ -782,9 +782,6 @@ function App() {
                 Preview
               </button>
             </div>
-            <span className="top-bar-title">
-              {showPreview ? '' : (selectedFile?.name || 'No file selected')}
-            </span>
           </div>
           <div className="top-bar-section top-bar-right">
             <button
@@ -801,7 +798,7 @@ function App() {
                 }
               }}
             >
-              Local Terminal
+              Terminal
             </button>
             <button
               className="btn-flat btn-claude"

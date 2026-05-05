@@ -697,6 +697,7 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
     # as raw bytes rather than the default base64-wrapped Contents API JSON.
     file_headers = {**auth_headers, "Accept": "application/vnd.github.raw"}
     written: list[str] = []
+    failed: list[tuple[str, str]] = []
     timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -710,18 +711,33 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
                 entry_rel = f"{rel_path}/{name}" if rel_path else name
                 if entry.get("type") == "dir":
                     (dest_root / entry_rel).mkdir(parents=True, exist_ok=True)
-                    await fetch_dir(entry_rel)
+                    try:
+                        await fetch_dir(entry_rel)
+                    except Exception as e:
+                        # One subtree failing shouldn't stop the rest of the cascade.
+                        failed.append((entry_rel, repr(e)))
+                        print(f"[Build] cascade: subtree {entry_rel} failed: {e}")
                 elif entry.get("type") == "file":
-                    file_res = await client.get(f"{PROXY_BASE_URL}/{entry_rel}", headers=file_headers)
-                    file_res.raise_for_status()
-                    local_path = dest_root / entry_rel
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
-                    local_path.write_bytes(file_res.content)
-                    written.append(entry_rel)
+                    try:
+                        file_res = await client.get(f"{PROXY_BASE_URL}/{entry_rel}", headers=file_headers)
+                        file_res.raise_for_status()
+                        local_path = dest_root / entry_rel
+                        local_path.parent.mkdir(parents=True, exist_ok=True)
+                        local_path.write_bytes(file_res.content)
+                        written.append(entry_rel)
+                    except Exception as e:
+                        # Skip-and-log so a single bad file (timeout on a big
+                        # binary, transient proxy 5xx, etc.) doesn't strand
+                        # the rest of the cascade — including the small
+                        # files that come after it in iteration order.
+                        failed.append((entry_rel, repr(e)))
+                        print(f"[Build] cascade: file {entry_rel} failed: {e}")
 
         if subpath:
             (dest_root / subpath).mkdir(parents=True, exist_ok=True)
         await fetch_dir(subpath)
+    if failed:
+        print(f"[Build] cascade: {len(failed)} entries failed; {len(written)} succeeded")
     return written
 
 

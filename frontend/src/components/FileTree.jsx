@@ -2,6 +2,18 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { createFolder, createFile, deleteEntry, renameEntry, moveEntry, getParentHandle } from '../utils/fileSystem'
 
+// Backend tree paths are project-relative POSIX (e.g. "templates",
+// "templates/pwa_duckdb/run_app.sh"). The leading-slash variants are kept in
+// case any caller passes an absolute path. Used everywhere we need to gate
+// auto-expansion / writes against the read-only templates/ folder.
+const isTemplatesPath = (p) => {
+  if (typeof p !== 'string') return false
+  return p === 'templates'
+    || p.startsWith('templates/')
+    || p.endsWith('/templates')
+    || p.includes('/templates/')
+}
+
 // SVG Icons for different file types
 const FolderIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" className="tree-item-icon folder">
@@ -108,6 +120,7 @@ const TreeNode = ({
   modifiedPaths,
   onAnimationEnd,
   expandedPaths,
+  userExpandedTemplates,
   onToggleExpand,
   registerRef,
   onContextMenu,
@@ -125,7 +138,15 @@ const TreeNode = ({
   isConnected
 }) => {
   const isCodespaceBridge = node.name === 'codespace_bridge' || node.path.includes('/codespace_bridge/')
-  const isExpanded = isCodespaceBridge ? false : expandedPaths.has(node.path)
+  // Templates expansion is structurally separate from expandedPaths so no
+  // cascade event, watcher refresh, or other code path can ever leave a
+  // templates folder visually expanded — only a direct chevron click can.
+  const isInsideTemplates = isTemplatesPath(node.path)
+  const isExpanded = isCodespaceBridge
+    ? false
+    : isInsideTemplates
+      ? userExpandedTemplates.has(node.path)
+      : expandedPaths.has(node.path)
   const itemRef = useRef(null)
   const inputRef = useRef(null)
   const isNew = newPaths.has(node.path)
@@ -316,6 +337,7 @@ const TreeNode = ({
               modifiedPaths={modifiedPaths}
               onAnimationEnd={onAnimationEnd}
               expandedPaths={expandedPaths}
+              userExpandedTemplates={userExpandedTemplates}
               onToggleExpand={onToggleExpand}
               registerRef={registerRef}
               onContextMenu={onContextMenu}
@@ -641,6 +663,12 @@ const FileTree = ({
   const [modifiedPathsState, setModifiedPathsState] = useState(new Set())
   const [notifications, setNotifications] = useState([])
   const [internalExpandedPaths, setInternalExpandedPaths] = useState(new Set())
+  // Templates expansion is held in its own state, completely segregated from
+  // expandedPaths. The render path for any templates/ folder reads ONLY from
+  // this set, so no cascade event, watcher refresh, or other code path that
+  // mutates expandedPaths can ever leave a templates folder visually expanded.
+  // Only onToggleExpand (chevron click / double-click) writes here.
+  const [userExpandedTemplates, setUserExpandedTemplates] = useState(new Set())
 
   // Use controlled paths if provided, otherwise use internal state
   const expandedPaths = controlledExpandedPaths !== undefined ? controlledExpandedPaths : internalExpandedPaths
@@ -679,14 +707,17 @@ const FileTree = ({
       if (!nodes) return
       for (const node of nodes) {
         paths.push(node.path)
-        if (node.isDirectory && expandedPaths.has(node.path) && node.children) {
+        const expanded = isTemplatesPath(node.path)
+          ? userExpandedTemplates.has(node.path)
+          : expandedPaths.has(node.path)
+        if (node.isDirectory && expanded && node.children) {
           walk(node.children)
         }
       }
     }
     walk(tree)
     return paths
-  }, [tree, expandedPaths])
+  }, [tree, expandedPaths, userExpandedTemplates])
 
   const handleFileClick = useCallback((node, e) => {
     if (e.shiftKey && lastClickedPathRef.current) {
@@ -711,6 +742,19 @@ const FileTree = ({
   }, [getVisiblePaths])
 
   const onToggleExpand = useCallback((path) => {
+    if (isTemplatesPath(path)) {
+      setUserExpandedTemplates(prev => {
+        const next = new Set(prev)
+        const prefix = path + '/'
+        for (const p of Array.from(next)) {
+          if (p.startsWith(prefix)) next.delete(p)
+        }
+        if (next.has(path)) next.delete(path)
+        else next.add(path)
+        return next
+      })
+      return
+    }
     setExpandedPaths(prev => {
       const next = new Set(prev)
       // Clear descendants on every toggle. Without this, expandToPath (called
@@ -736,7 +780,7 @@ const FileTree = ({
   const expandToPath = useCallback((path) => {
     // Never auto-expand into templates/ — it's a read-only reference library
     // and stays collapsed unless the user clicks the chevron themselves.
-    if (path.includes('/templates/') || path.endsWith('/templates')) return
+    if (isTemplatesPath(path)) return
     const ancestors = getAncestorPaths(path)
     setExpandedPaths(prev => {
       const next = new Set(prev)
@@ -745,24 +789,15 @@ const FileTree = ({
     })
   }, [])
 
-  // Folders that should never auto-expand
-  const NEVER_AUTO_EXPAND = ['meta_data', 'templates']
-
   useEffect(() => {
     if (tree.length > 0 && expandedPaths.size === 0) {
       const root = tree[0]
-      if (root?.path) {
-        const paths = new Set([root.path])
-        // Also expand top-level children (app_folder, input_folder, output_folder, etc.)
-        // but never meta_data
-        if (root.children) {
-          for (const child of root.children) {
-            if (child.isDirectory && !NEVER_AUTO_EXPAND.includes(child.name)) {
-              paths.add(child.path)
-            }
-          }
-        }
-        setExpandedPaths(paths)
+      // Expand the project root only — makes the root-level files and
+      // top-level subfolders visible in the tree, but every subfolder stays
+      // collapsed until the user clicks its chevron. Backend gives the root
+      // an empty-string path, which is why we check `root` (not `root?.path`).
+      if (root) {
+        setExpandedPaths(new Set([root.path]))
       }
     }
   }, [tree])
@@ -1224,7 +1259,7 @@ const FileTree = ({
           // a starter library — users open the folder manually if they
           // want to inspect a template.
           const inMetaData = path.includes('/meta_data/') || path.endsWith('/meta_data')
-          const inTemplates = path.includes('/templates/') || path.endsWith('/templates')
+          const inTemplates = isTemplatesPath(path)
           if (!inMetaData && !inTemplates) {
             expandToPath(path)
           }
@@ -1250,7 +1285,7 @@ const FileTree = ({
         if (node) {
           // Never auto-expand into meta_data or templates.
           const inMetaData = path.includes('/meta_data/') || path.endsWith('/meta_data')
-          const inTemplates = path.includes('/templates/') || path.endsWith('/templates')
+          const inTemplates = isTemplatesPath(path)
           if (!inMetaData && !inTemplates) {
             expandToPath(path)
           }
@@ -1446,6 +1481,7 @@ const FileTree = ({
           modifiedPaths={modifiedPathsState}
           onAnimationEnd={() => handleAnimationEnd(node.path)}
           expandedPaths={expandedPaths}
+          userExpandedTemplates={userExpandedTemplates}
           onToggleExpand={onToggleExpand}
           registerRef={registerRef}
           onContextMenu={handleContextMenu}
