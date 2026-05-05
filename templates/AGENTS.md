@@ -597,15 +597,32 @@ Browsers block `fetch()`, Workers, and WASM loading from `file://` URLs due to s
 ```
 app_folder/
 └── scripts/
-    └── {app_name}/                     <- Everything for this app lives here
-        ├── build_app_package.py        <- Build script (creates the output folder)
-        └── src/                        <- PWA source files
-            ├── index.html              <- Entry point
-            ├── css/styles.css          <- Styles
-            └── js/app.js               <- React app (plain JS, no JSX)
+    └── {app_name}/                          <- Everything for this app lives here
+        ├── build_app_package.py             <- Build script (assembles the distributable)
+        ├── run_app.sh                       <- Dev launcher (Mac/Linux)
+        ├── run_app.bat                      <- Dev launcher (Windows)
+        └── app_core/
+            ├── prepare_dev_assets.py        <- Stages parquets from input_folder/ into src_app/data/
+            ├── serve.py                     <- Local dev HTTP server (Python stdlib, picks free port)
+            ├── sample_data/                 <- Fallback parquets — used only when input_folder/ is empty
+            └── src_app/                     <- The PWA source — exactly what ships to the recipient
+                ├── index.html
+                ├── css/styles.css
+                ├── js/app.js                <- React app (plain JS, no JSX)
+                ├── lib/                     <- Pre-bundled browser libs, committed to the template
+                │   ├── react.min.js
+                │   ├── react-dom.min.js
+                │   ├── duckdb-bundle.js
+                │   ├── duckdb-eh.wasm
+                │   └── duckdb-browser-eh.worker.js
+                └── data/
+                    ├── app_config.json      <- App metadata + dataset schemas (see below)
+                    └── *.parquet            <- Staged from input_folder/ at build/dev time
 ```
 
-The build script is **always named `build_app_package.py`**. It reads from its sibling `src/` folder and creates the distributable folder at `output_folder/{app_name}/` (the script `os.makedirs(..., exist_ok=True)` it itself — never expect the folder to exist beforehand). Both the source and the build script live together inside `app_folder/scripts/{app_name}/` — never at the top of `app_folder/`.
+The build script is **always named `build_app_package.py`** and lives at the task folder's top level alongside `run_app.sh`/`run_app.bat`. Everything else — the dev tooling (`prepare_dev_assets.py`, `serve.py`), the optional sample fallback, and the actual web app source — is grouped under `app_core/`. The `src_app/` subfolder is the only thing that gets shipped: `build_app_package.py` does a `shutil.copytree(src_app, application_files)` and stops.
+
+**Pre-bundled `lib/` — no Node.js, ever.** The React UMD bundles, the DuckDB-WASM browser bundle (`duckdb-bundle.js`), the worker, and the `.wasm` itself are all committed in `src_app/lib/`. The build script does not run npm, esbuild, or fetch from unpkg — it just copies. This makes the whole pipeline pure-Python on the developer's machine, and the recipient never touches Node at all.
 
 ### Output (what gets distributed)
 
@@ -624,11 +641,11 @@ output_folder/
         ├── lib/
         │   ├── react.min.js                <- React 18 UMD production build
         │   ├── react-dom.min.js            <- ReactDOM 18 UMD production build
-        │   ├── duckdb-bundle.js            <- DuckDB-WASM bundled with esbuild
-        │   ├── duckdb-eh.wasm              <- DuckDB WASM binary (~35 MB)
+        │   ├── duckdb-bundle.js            <- DuckDB-WASM browser bundle (committed, no esbuild)
+        │   ├── duckdb-eh.wasm              <- DuckDB WASM binary (~33 MB)
         │   └── duckdb-browser-eh.worker.js <- DuckDB Web Worker
         ├── data/
-        │   ├── manifest.json               <- Lists all Parquet files
+        │   ├── app_config.json             <- App metadata + dataset schemas
         │   └── *.parquet                   <- Data files from input_folder/
         └── serve.ps1                       <- PowerShell HTTP server (called by pc_start.bat)
 ```
@@ -643,39 +660,50 @@ The build script must `chmod +x` both Mac files so they're executable.
 
 ## Build Script Template
 
-The build script (`app_folder/scripts/{app_name}/build_app_package.py`) runs on the **developer's machine** (requires Node.js for the one-time esbuild step). It creates `output_folder/{app_name}/` (`os.makedirs(..., exist_ok=True)`), reads source files from its sibling `src/` folder, and writes the distributable contents into the new folder.
+The build script (`app_folder/scripts/{app_name}/build_app_package.py`) runs on the **developer's machine** with nothing but Python — no Node.js, no npm, no esbuild. It assembles the distributable at `output_folder/{app_name}/` (rmtree-and-recreate; never assume it already exists).
 
-### What the build script does (5 steps):
+### What the build script does (2 steps):
 
-1. **Bundle DuckDB-WASM** — `npm install @duckdb/duckdb-wasm esbuild` in a temp dir, bundle with esbuild into a single IIFE script, copy the `.wasm` and worker files into `application_files/lib/`
-2. **Download React** — fetch React 18 UMD production builds from unpkg CDN into `application_files/lib/`
-3. **Copy app files** — `index.html`, `css/styles.css`, `js/app.js` from `app_folder/scripts/{app_name}/src/` into `application_files/`
-4. **Copy Parquet data + generate manifest** — copy all `.parquet` files from `input_folder/` into `application_files/data/`, write `application_files/data/manifest.json`
-5. **Create launcher scripts at the package top level** — `pc_start.bat`, `mac_start.command`, `mac_start.sh` (the three launchers); `serve.ps1` goes inside `application_files/` since it's invoked by `pc_start.bat`. The build script must `os.chmod(..., 0o755)` on `mac_start.command` and `mac_start.sh` so they're executable.
+1. **Stage parquet data** — call `prepare_dev_assets()` from `app_core/prepare_dev_assets.py`. This walks `app_config.json`'s `datasets[].file` list and copies each parquet from `input_folder/` into `src_app/data/`. If a file is missing from `input_folder/` but already exists in `src_app/data/`, it's left alone (idempotent re-runs). If neither has it, `sample_data/` is used as a last-resort fallback for template demos — real apps should never hit this branch.
+2. **Assemble the package** — `shutil.copytree(src_app/, application_files/)`, then write the four launcher files at the package top level (`pc_start.bat`, `mac_start.command`, `mac_start.sh`, plus `serve.ps1` *inside* `application_files/`). `os.chmod(..., 0o755)` both Mac launchers.
 
-### esbuild bundling approach:
+That's the whole build. The pre-bundled `lib/` (React UMD, `duckdb-bundle.js`, `.wasm`, worker) rides along inside `src_app/` and gets copied untouched. There is no esbuild step, no React download from unpkg, and no `manifest.json` to write — `app_config.json` already lives in `src_app/data/` and gets copied with everything else.
 
-```python
-# Create entry point that re-exports duckdb-wasm to window.duckdb
-entry = "import * as duckdb from '@duckdb/duckdb-wasm';\nwindow.duckdb = duckdb;\n"
+### app_config.json format:
 
-# Bundle as IIFE for browser
-# npx esbuild entry.js --bundle --format=iife --outfile=duckdb-bundle.js --platform=browser --target=es2020
-```
-
-This produces a single `duckdb-bundle.js` that exposes `window.duckdb` — no ES module imports needed.
-
-### manifest.json format:
+`app_config.json` is the single source of truth for the app's metadata: title, dataset list, and per-column display + filter rules. The dev launcher reads it to know which parquets to stage; the React app reads the same file at runtime to render the UI. Schema:
 
 ```json
 {
+  "app_title": "Data Viewer",
   "datasets": [
-    {"displayName": "Human Readable Name", "filename": "actual_file.parquet"}
+    {
+      "id": "customers",
+      "label": "Customers",
+      "file": "customers.parquet",
+      "columns": [
+        { "name": "customer_id",     "label": "ID" },
+        { "name": "name",            "label": "Name",           "filter": "text" },
+        { "name": "region",          "label": "Region",         "filter": "select" },
+        { "name": "is_active",       "label": "Active",         "filter": "boolean" },
+        { "name": "lifetime_value",  "label": "Lifetime Value", "filter": "range" }
+      ]
+    }
   ]
 }
 ```
 
-The `displayName` is derived from the filename with `.parquet` stripped. The app reads this manifest to discover available datasets.
+| Field | Purpose |
+|---|---|
+| `app_title` | Browser tab title and header |
+| `datasets[].id` | Stable identifier — used in URL state, internal lookups |
+| `datasets[].label` | Human-readable name in the dataset picker |
+| `datasets[].file` | Parquet filename inside `data/` |
+| `columns[].name` | Actual column name in the parquet |
+| `columns[].label` | Display name in the table header and filter UI |
+| `columns[].filter` | Filter widget — one of `text`, `select`, `boolean`, `range`. Omit for display-only columns. |
+
+A column without a `filter` field is still shown in the table but has no filter widget. Adding a column to a dataset is a config-only change — no JS edit required.
 
 ## HTML Template
 
@@ -747,22 +775,22 @@ async function initDuckDB() {
 
 ```javascript
 async function loadDatasets(db) {
-    var resp = await fetch("data/manifest.json");
-    var manifest = await resp.json();
-    var datasets = manifest.datasets;
+    var resp = await fetch("data/app_config.json");
+    var config = await resp.json();
+    var datasets = config.datasets;
 
     for (var i = 0; i < datasets.length; i++) {
         var ds = datasets[i];
-        var dataResp = await fetch("data/" + ds.filename);
+        var dataResp = await fetch("data/" + ds.file);
         var buffer = new Uint8Array(await dataResp.arrayBuffer());
-        await db.registerFileBuffer(ds.filename, buffer);
+        await db.registerFileBuffer(ds.file, buffer);
     }
 
     return datasets;
 }
 ```
 
-Each Parquet file is fetched, loaded into a `Uint8Array`, and registered with DuckDB. After registration, you can query it with SQL: `SELECT * FROM read_parquet('filename.parquet')`.
+Each Parquet file is fetched, loaded into a `Uint8Array`, and registered with DuckDB. After registration, you can query it with SQL: `SELECT * FROM read_parquet('filename.parquet')`. Use `ds.file` for the registered name and the `read_parquet()` argument so they match.
 
 ### Querying with SQL
 
@@ -1052,7 +1080,9 @@ async function onDatasetSelect(db, dataset) {
 For dashboards that don't need row-level detail, create summary files at build time:
 
 ```python
-# In build script (app.py) — runs on developer's machine with full Polars
+# In build_app_package.py (or a helper called from it) — runs on developer's
+# machine with full Polars. Write summaries into src_app/data/ so they get
+# copied with everything else when the package is assembled.
 import polars as pl
 
 raw = pl.scan_parquet("input_folder/sales.parquet")
@@ -1063,56 +1093,48 @@ summary = (
     .agg(pl.col("revenue").sum(), pl.col("units").sum())
     .collect(engine="streaming")
 )
-summary.write_parquet("output_folder/app_name/data/sales_summary.parquet")
+summary.write_parquet("app_folder/scripts/{app_name}/app_core/src_app/data/sales_summary.parquet")
 
-# Ship both: summary for fast default view, raw for drill-down
+# Add the summary to app_config.json's datasets array so the app knows
+# about it. Ship both: summary for the fast default view, raw for drill-down.
 ```
 
 The app loads the small summary first (instant), and only fetches the full dataset if the user drills down.
 
 ## Track 2 Dev Launcher Scripts (REQUIRED)
 
-Every PWA task folder must contain `run_app.sh` and `run_app.bat` alongside `build_app_package.py` and `src/`. These are the **developer's** one-command launchers — they rebuild the package and immediately launch the OS-appropriate launcher inside `output_folder/{app_name}/`. Don't confuse them with the recipient-facing launchers (`pc_start.bat` / `mac_start.command` / `mac_start.sh`) that ship inside the output package.
+Every PWA task folder must contain `run_app.sh` and `run_app.bat` alongside `build_app_package.py` and `app_core/`. These are the **developer's** one-command "edit and reload" launchers — they stage parquet data and serve `src_app/` directly via `app_core/serve.py` so source edits are visible on browser refresh, without ever touching `output_folder/`.
+
+This is intentionally **not** a build-and-launch flow. To dogfood the actual distributable (verify the launcher trio works, the .ps1 server serves the right MIMEs, etc.), run `python build_app_package.py` once and then run the output's `mac_start.sh` or `pc_start.bat` directly. Build-time only matters when you're about to ship.
 
 **`run_app.sh`:**
 ```bash
 #!/bin/bash
-# Run: bash app_folder/scripts/{app_name}/run_app.sh
+set -e
+
 cd "$(dirname "$0")"
-APP_NAME="$(basename "$(pwd)")"
 
-echo "[1/2] Building app package..."
-python build_app_package.py || exit 1
-
-echo "[2/2] Launching..."
-PROJECT_DIR="$(cd ../../.. && pwd)"
-OUTPUT_PKG="$PROJECT_DIR/output_folder/$APP_NAME"
-bash "$OUTPUT_PKG/mac_start.sh"
+python3 app_core/prepare_dev_assets.py
+python3 app_core/serve.py
 ```
 
 **`run_app.bat`:**
 ```batch
 @echo off
-REM Run: app_folder\scripts\{app_name}\run_app.bat
 cd /d "%~dp0"
-for %%I in ("%cd%") do set APP_NAME=%%~nxI
 
-echo [1/2] Building app package...
-python build_app_package.py
+python app_core\prepare_dev_assets.py
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
-
-echo [2/2] Launching...
-cd /d "%~dp0..\..\..\output_folder\%APP_NAME%"
-call pc_start.bat
+python app_core\serve.py
 ```
 
-`run_app.sh` must be `chmod +x` so it runs without `bash` prefix. The launcher is OS-specific by design — Mac developers use `.sh`, Windows developers use `.bat`. Both rebuild + serve in one step so the developer always sees their latest source changes.
+`run_app.sh` must be `chmod +x` so it runs without `bash` prefix. `prepare_dev_assets.py` syncs the parquets listed in `app_config.json` from `input_folder/` into `src_app/data/`. `serve.py` then picks a free port, registers `.wasm`/`.parquet` MIME types, opens the browser, and serves `src_app/` until Ctrl+C. Edit `js/app.js` or `app_config.json`, hit reload, see the change — no rebuild step in the loop.
 
 ## PWA Constraints and Gotchas
 
 1. **No JSX** — all React code must use `React.createElement`. No transpiler runs on the user's machine.
 2. **No ES modules** — use plain `<script>` tags and `window.duckdb`. The `file://` fallback is broken for modules.
-3. **No Node.js on user's machine** — Node.js is only needed on the developer's machine during `build_`.
+3. **No Node.js anywhere — not even on the developer's machine.** The browser libs in `src_app/lib/` (React UMD, the DuckDB-WASM bundle, the worker, and the `.wasm` itself) are pre-bundled and committed to the template. The build script just copies; it never runs npm or esbuild.
 4. **No Python on user's Windows machine** — that's why Windows uses PowerShell for the HTTP server instead of `python3 -m http.server`.
 5. **Absolute URLs for WASM/Worker** — always derive from `window.location.href`, never use relative paths.
 6. **Dynamic port** — launcher scripts pick an available port at startup (bind to port 0, OS assigns one). Never hardcode a port number.
