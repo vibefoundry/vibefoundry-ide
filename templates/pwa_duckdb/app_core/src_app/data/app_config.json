@@ -1,0 +1,32 @@
+{
+  "app_title": "Data Viewer",
+  "datasets": [
+    {
+      "id": "customers",
+      "label": "Customers",
+      "file": "customers.parquet",
+      "columns": [
+        { "name": "customer_id", "label": "ID" },
+        { "name": "name", "label": "Name", "filter": "text" },
+        { "name": "region", "label": "Region", "filter": "select" },
+        { "name": "signup_date", "label": "Signup Date" },
+        { "name": "is_active", "label": "Active", "filter": "boolean" },
+        { "name": "lifetime_value", "label": "Lifetime Value", "filter": "range" }
+      ]
+    },
+    {
+      "id": "orders",
+      "label": "Orders",
+      "file": "orders.parquet",
+      "columns": [
+        { "name": "order_id", "label": "Order #" },
+        { "name": "customer_id", "label": "Customer" },
+        { "name": "category", "label": "Category", "filter": "select" },
+        { "name": "product", "label": "Product", "filter": "text" },
+        { "name": "quantity", "label": "Qty", "filter": "range" },
+        { "name": "price", "label": "Price", "filter": "range" },
+        { "name": "order_date", "label": "Order Date" }
+      ]
+    }
+  ]
+}

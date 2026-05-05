@@ -683,18 +683,26 @@ def _auth_callback_html(error: str = "") -> str:
 # --- Templates proxy + Build endpoint ----------------------------------------
 
 
-async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
+async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str = "") -> list[str]:
     """Recursively fetch templates/ (including subfolders) from the private
     proxy using a Clerk JWT and write everything into dest_root. Subfolder
     structure is preserved. Raises on proxy errors so the caller can decide
-    whether to fall back."""
-    headers = {"Authorization": f"Bearer {jwt}"}
-    written: list[str] = []
+    whether to fall back.
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    If subpath is given (e.g. "pwa_duckdb"), only that subtree is fetched,
+    and files land at dest_root/<subpath>/... — the subpath name is preserved.
+    """
+    auth_headers = {"Authorization": f"Bearer {jwt}"}
+    # vnd.github.raw is required so binary files (.wasm, .parquet) come back
+    # as raw bytes rather than the default base64-wrapped Contents API JSON.
+    file_headers = {**auth_headers, "Accept": "application/vnd.github.raw"}
+    written: list[str] = []
+    timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
         async def fetch_dir(rel_path: str = "") -> None:
             url = f"{PROXY_BASE_URL}/{rel_path}" if rel_path else PROXY_BASE_URL
-            listing_res = await client.get(url, headers=headers)
+            listing_res = await client.get(url, headers=auth_headers)
             listing_res.raise_for_status()
             entries = listing_res.json()
             for entry in entries:
@@ -704,26 +712,28 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str) -> list[str]:
                     (dest_root / entry_rel).mkdir(parents=True, exist_ok=True)
                     await fetch_dir(entry_rel)
                 elif entry.get("type") == "file":
-                    file_res = await client.get(f"{PROXY_BASE_URL}/{entry_rel}", headers=headers)
+                    file_res = await client.get(f"{PROXY_BASE_URL}/{entry_rel}", headers=file_headers)
                     file_res.raise_for_status()
                     local_path = dest_root / entry_rel
                     local_path.parent.mkdir(parents=True, exist_ok=True)
                     local_path.write_bytes(file_res.content)
                     written.append(entry_rel)
 
-        await fetch_dir()
+        if subpath:
+            (dest_root / subpath).mkdir(parents=True, exist_ok=True)
+        await fetch_dir(subpath)
     return written
 
 
 @app.post("/api/build")
 async def build_project():
-    """Build the project structure - creates folders + cascades AGENTS.md only.
+    """Build the project structure - creates folders, cascades AGENTS.md, and
+    cascades the pwa_duckdb template tree.
 
-    The full template tree (geo_dashboard, trend_analytics_dashboard,
-    data_pipeline, etc.) is intentionally NOT cascaded — only AGENTS.md
-    drops into the project root. To re-enable the full template cascade
-    later, swap the single-file fetch below for a call to
-    _cascade_templates_via_proxy().
+    Other template subfolders (geo_dashboard, trend_analytics_dashboard,
+    data_pipeline, etc.) are still NOT cascaded. To re-enable the full
+    template cascade later, swap the targeted pwa_duckdb fetch below for a
+    call to _cascade_templates_via_proxy() with no subpath.
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -763,6 +773,21 @@ async def build_project():
                     templates_written = ["AGENTS.md"]
         except Exception as e:
             print(f"[Build] Public AGENTS.md fallback also failed: {e}")
+
+    # Cascade pwa_duckdb template (everything, including .wasm/.parquet binaries)
+    # into <project>/templates/pwa_duckdb/. Authenticated-only — the public
+    # static path doesn't expose a directory listing for recursive fetch.
+    pwa_duckdb_files: list[str] = []
+    if jwt:
+        try:
+            pwa_duckdb_files = await _cascade_templates_via_proxy(
+                state.project_folder / "templates",
+                jwt,
+                subpath="pwa_duckdb",
+            )
+            print(f"[Build] Cascaded {len(pwa_duckdb_files)} files from pwa_duckdb")
+        except Exception as e:
+            print(f"[Build] pwa_duckdb cascade failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
@@ -823,6 +848,7 @@ async def build_project():
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
         "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
+        "pwa_duckdb_files_cascaded": len(pwa_duckdb_files),
         "git_initialized": git_initialized
     }
 
