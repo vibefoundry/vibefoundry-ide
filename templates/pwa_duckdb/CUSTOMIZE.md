@@ -27,7 +27,7 @@ app_core/
 
 **Light exploration is fine — heavy reading is not.** Running `ls` or scanning the inventory above is free. But don't open the contents of any file tagged "No edits" or "No touch" — you don't need to know how `app.js` consumes the config or how `prepare_dev_assets.py` mirrors `input_folder/`. Trust this recipe. Files you *do* need to open: `index.html` (to replace the title), the user's parquets (one `head(5)` per file), and the existing `app_config.json` if you want to see the schema by example. That's it.
 
-**One Polars call per parquet.** `pl.scan_parquet(file).head(5).collect()` gives you names, dtypes, and sample values in one shot. Don't follow up with `n_unique`, `describe`, `group_by`, or "just one more to verify" — none of those are needed for the lightest-touch config you're writing.
+**Two Polars calls per parquet, max.** First `pl.scan_parquet(file).head(5).collect()` for column names + dtypes + sample values. Second, `pl.scan_parquet(file).select([pl.col(c).n_unique() for c in <string_cols>]).collect()` to get distinct counts for string columns only — you need those to decide `select` vs `text` filter widgets (see Step 5a). Don't follow up with `describe`, `group_by`, or per-column `min/max` queries; the dtype alone tells you `range` is right for numerics, the n_unique tells you `select` vs `text` for strings.
 
 **Fit the data to the app. Do not improve the app.** This recipe exists because the template already works. Your job is to swap in the user's data, write the config, and stop. Specifically:
 
@@ -76,14 +76,25 @@ python -c "import polars as pl; print(pl.scan_parquet('app_core/src_app/data/<f>
       "label": "Display Name",
       "file": "actual_file.parquet",
       "columns": [
-        { "name": "raw_col_name", "label": "Title Case Label" }
+        { "name": "raw_col_name", "label": "Title Case Label", "filter": "select" }
       ]
     }
   ]
 }
 ```
 
-**Do NOT add `filter` fields to any column.** Every column renders display-only on first launch. The user adds `"filter": "text" | "select" | "range" | "boolean"` themselves once they see the data and decide what they want filterable. Don't pre-decide for them.
+**Pick a sensible default `filter` for each column** based on dtype and cardinality. The user can refine after seeing the app, but the first launch should have a usable filter sidebar — not an empty "No Filters Configured" state.
+
+| Column dtype | Default filter |
+|---|---|
+| Numeric (Int*, Float*, Decimal) | `"filter": "range"` |
+| Boolean | `"filter": "boolean"` |
+| String / Utf8 with `n_unique() <= 80` | `"filter": "select"` |
+| String / Utf8 with `n_unique() > 80` | `"filter": "text"` |
+| Date / Datetime / Timestamp | omit `filter` (display-only is fine) |
+| ID-like columns (`_id`, `_code`, `_key`, `_number` suffix) | `"filter": "text"` — IDs are searched, never picked from a dropdown, regardless of cardinality |
+
+**Don't run `n_unique()` on non-string columns** — the dtype alone tells you `range` is right for numerics and `boolean` is right for booleans. The 80-cardinality split is the only place `n_unique()` is justified, and you only need it for string columns.
 
 ## Step 5b — `index.html` title
 
@@ -104,4 +115,4 @@ Browser opens, datasets load in DuckDB-WASM, table renders. Hand off — the use
 
 - No npm, no esbuild, no React download — `lib/` is pre-bundled and committed.
 - No `manifest.json` — `app_config.json` is the source of truth.
-- No filter inference. The user picks widgets after seeing the data.
+- No widget queries beyond `n_unique()` on string columns. No `min`/`max`/`describe`/`group_by` runs to "tune" the filter for the user.
