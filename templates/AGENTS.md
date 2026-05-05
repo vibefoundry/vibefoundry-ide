@@ -1036,6 +1036,16 @@ map.addHeatmap(grid);  // hundreds of points, instant
 
 Add them the same way as React — download the UMD build in the build script and include via `<script>` tag. No npm on the user's machine.
 
+### Geospatial defaults
+
+For map-based apps, default to:
+
+- **Leaflet over deck.gl.** Use deck.gl only when the user explicitly asks for it, or when the dataset is large enough (100K+ rendered points) that Leaflet drops frames. Leaflet covers choropleth, markers, polygons, and heatmaps cleanly for nearly every business case and keeps the bundle lighter.
+- **OpenStreetMap as the basemap.** Free, no API key, decent global coverage. Tile URL: `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`. Always include the attribution string `'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'` on the tile layer.
+- **TIGER (US Census boundaries / street data) — only fetch when the user explicitly requests it.** Source: <https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html>. TIGER ships as Shapefiles; convert them to Parquet with a geometry column (via DuckDB's spatial extension or GeoPandas) before shipping inside the app's `data/` folder — the browser should never have to parse Shapefile bytes.
+
+Everything else — choropleth thresholds, marker clustering rules, custom layer interactions, projection handling — is up to you given the user's specific ask. Don't over-engineer the map until the user tells you what they actually want to see.
+
 ### DuckDB spatial extension
 
 DuckDB has a `spatial` extension for geometry operations:
