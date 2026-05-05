@@ -734,6 +734,9 @@ const FileTree = ({
   }, [])
 
   const expandToPath = useCallback((path) => {
+    // Never auto-expand into templates/ — it's a read-only reference library
+    // and stays collapsed unless the user clicks the chevron themselves.
+    if (path.includes('/templates/') || path.endsWith('/templates')) return
     const ancestors = getAncestorPaths(path)
     setExpandedPaths(prev => {
       const next = new Set(prev)
@@ -743,7 +746,7 @@ const FileTree = ({
   }, [])
 
   // Folders that should never auto-expand
-  const NEVER_AUTO_EXPAND = ['meta_data']
+  const NEVER_AUTO_EXPAND = ['meta_data', 'templates']
 
   useEffect(() => {
     if (tree.length > 0 && expandedPaths.size === 0) {

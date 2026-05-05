@@ -80,6 +80,14 @@ All transformations, merges, cleaning, filtering, deduplication, reformatting, a
 
 This is a hard rule with no exceptions. Even if the user says "fix the data" or "clean the CSV," that means: read the input, transform it, and save the result as output. Never write back to `input_folder/`.
 
+## `templates/` Is Read-Only — Never Edit It
+
+**Never modify, create, rename, or delete anything inside `templates/`.** The folder is a reference library cascaded into the project by Build — it is not project source. Treat it like vendored third-party code: you read from it, you copy *out* of it, but you never write *into* it.
+
+If you need to start a new app from a template, **fork it**: copy the relevant subfolder out of `templates/` into `app_folder/scripts/{your_app_name}/` and edit there. Never edit `templates/{template}/` in place, even for "small fixes" or "to try something." If the template itself needs changing, that's a change to the upstream template repo, not to this project.
+
+The IDE keeps `templates/` collapsed in the file tree by design — open it only to look, never to type. Anything that lands inside that folder during a session is reference material, not work product.
+
 ---
 
 # Track 1: Python Scripts (Data Processing)
