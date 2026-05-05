@@ -1677,6 +1677,9 @@ async def write_file(request: WriteFileRequest):
 UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024  # 8MB
 
 
+SKIP_UPLOAD_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized"}
+
+
 @app.post("/api/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
@@ -1685,6 +1688,9 @@ async def upload_file(
     """Upload a binary file to a folder, streaming to disk in chunks."""
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
+
+    if file.filename in SKIP_UPLOAD_NAMES:
+        return {"success": True, "path": None, "skipped": True}
 
     # Build target path
     target_folder = state.project_folder / folder
@@ -1696,8 +1702,9 @@ async def upload_file(
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Create parent directories if needed
-    target_folder.mkdir(parents=True, exist_ok=True)
+    # Create parent directories if needed (covers both target_folder and any
+    # subpath embedded in file.filename, just in case)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Stream file to disk in chunks to avoid loading entire file into memory
     with open(target_path, "wb") as f:

@@ -1349,11 +1349,78 @@ body {
 
 /* JSON Viewer */
 .json-viewer {
-  padding: 24px;
+  height: 100%;
+  overflow: auto;
   background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.json-viewer-inner {
+  padding: 24px;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
   line-height: 1.6;
+  color: var(--color-text);
+}
+
+.json-viewer .json-line {
+  white-space: pre;
+}
+
+.json-viewer .json-children {
+  padding-left: 20px;
+  border-left: 1px dashed var(--color-border, #d0d7de);
+  margin-left: 4px;
+}
+
+.json-viewer .json-toggle {
+  display: inline-block;
+  width: 14px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-muted, #666);
+}
+
+.json-viewer .json-toggle:hover {
+  color: var(--color-accent, #4a9eda);
+}
+
+.json-viewer .json-ellipsis {
+  cursor: pointer;
+  color: var(--color-text-muted, #888);
+  font-style: italic;
+}
+
+.json-viewer .json-ellipsis:hover {
+  color: var(--color-accent, #4a9eda);
+}
+
+.json-viewer .json-bracket {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.json-viewer .json-key {
+  color: #0b75f5;
+  font-weight: 600;
+}
+
+.json-viewer .json-string {
+  color: #2a7d2a;
+}
+
+.json-viewer .json-number {
+  color: #b85c00;
+}
+
+.json-viewer .json-boolean {
+  color: #8a3ffc;
+  font-weight: 600;
+}
+
+.json-viewer .json-null {
+  color: #999;
+  font-style: italic;
 }
 
 /* Code Viewer */

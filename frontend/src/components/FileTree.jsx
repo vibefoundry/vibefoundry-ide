@@ -522,7 +522,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
         <>
           {node.isDirectory && (
             <>
-              {/* Add Data option for all folders */}
+              {/* Add Data: upload one or more files from disk */}
               <div className="context-menu-item" onClick={() => onAction('addData', node)}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
@@ -530,18 +530,25 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
                 </svg>
                 Add Data
               </div>
+              {/* Add Folder: upload an entire folder from disk (preserves subdirs) */}
+              <div className="context-menu-item" onClick={() => onAction('addFolder', node)}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2.5a2 2 0 0 1-2-2V3.87zM8 7.5a.5.5 0 0 1 .5.5v2h2a.5.5 0 0 1 0 1h-2v2a.5.5 0 0 1-1 0v-2h-2a.5.5 0 0 1 0-1h2V8a.5.5 0 0 1 .5-.5z"/>
+                </svg>
+                Add Folder
+              </div>
               <div className="context-menu-divider" />
               <div className="context-menu-item" onClick={() => onAction('newFolder', node)}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2.5a2 2 0 0 1-2-2V3.87z"/>
                 </svg>
-                Add Folder
+                Create Folder
               </div>
               <div className="context-menu-item" onClick={() => onAction('newFile', node)}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
                 </svg>
-                Add File
+                Create File
               </div>
               <div className="context-menu-divider" />
             </>
@@ -909,7 +916,7 @@ const FileTree = ({
 
                 if (!response.ok) {
                   const data = await response.json()
-                  throw new Error(data.detail || 'Upload failed')
+                  throw new Error(data.detail || 'Add data failed')
                 }
               }
 
@@ -919,13 +926,101 @@ const FileTree = ({
               if (onRefresh) onRefresh()
             } catch (err) {
               setUploadStatus(null)
-              console.error('Upload failed:', err)
-              alert('Failed to upload: ' + err.message)
+              console.error('Add data failed:', err)
+              alert('Failed to add data: ' + err.message)
             }
           }
           input.click()
         }
         break
+
+      case 'addFolder': {
+        if (node.handle) {
+          // Browser mode - File System Access API, recurse the directory
+          try {
+            const dirHandle = await window.showDirectoryPicker()
+
+            const copyDir = async (sourceDir, targetDir) => {
+              for await (const entry of sourceDir.values()) {
+                if (entry.kind === 'directory') {
+                  const subTarget = await targetDir.getDirectoryHandle(entry.name, { create: true })
+                  await copyDir(entry, subTarget)
+                } else {
+                  const file = await entry.getFile()
+                  setUploadStatus({ converting: false, filename: file.name })
+                  const buf = await file.arrayBuffer()
+                  const fileHandle = await targetDir.getFileHandle(entry.name, { create: true })
+                  const writable = await fileHandle.createWritable()
+                  await writable.write(buf)
+                  await writable.close()
+                }
+              }
+            }
+
+            const topTarget = await node.handle.getDirectoryHandle(dirHandle.name, { create: true })
+            await copyDir(dirHandle, topTarget)
+
+            setUploadStatus(null)
+            setExpandedPaths(prev => new Set([...prev, node.path]))
+            if (onRefresh) onRefresh()
+          } catch (err) {
+            setUploadStatus(null)
+            if (err.name !== 'AbortError') {
+              console.error('Add folder failed:', err)
+              alert('Failed to add folder: ' + err.message)
+            }
+          }
+        } else {
+          // Local backend mode - <input webkitdirectory> + upload API
+          const input = document.createElement('input')
+          input.type = 'file'
+          input.multiple = true
+          input.webkitdirectory = true
+          input.directory = true
+          input.onchange = async (e) => {
+            const SKIP = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', '.localized'])
+            const files = Array.from(e.target.files || []).filter(f => !SKIP.has(f.name))
+            if (files.length === 0) return
+
+            try {
+              for (const file of files) {
+                const relPath = file.webkitRelativePath || file.name
+                setUploadStatus({ converting: false, filename: relPath })
+
+                const lastSlash = relPath.lastIndexOf('/')
+                const subdir = lastSlash >= 0 ? relPath.slice(0, lastSlash) : ''
+                const targetFolder = node.path
+                  ? (subdir ? `${node.path}/${subdir}` : node.path)
+                  : subdir
+
+                const formData = new FormData()
+                formData.append('file', file)
+                formData.append('folder', targetFolder)
+
+                const response = await fetch('/api/files/upload', {
+                  method: 'POST',
+                  body: formData
+                })
+
+                if (!response.ok) {
+                  const data = await response.json()
+                  throw new Error(data.detail || 'Add folder failed')
+                }
+              }
+
+              setUploadStatus(null)
+              setExpandedPaths(prev => new Set([...prev, node.path]))
+              if (onRefresh) onRefresh()
+            } catch (err) {
+              setUploadStatus(null)
+              console.error('Add folder failed:', err)
+              alert('Failed to add folder: ' + err.message)
+            }
+          }
+          input.click()
+        }
+        break
+      }
 
       case 'convertToParquet': {
         setUploadStatus({ converting: true, filename: node.name })
