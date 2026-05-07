@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibefoundry"
-version = "0.2.12"
+version = "0.2.13"
 description = "A local IDE for data science workflows with script running and metadata generation"
 readme = "README.md"
 license = {text = "MIT"}
@@ -42,6 +42,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "watchdog>=3.0.0",
     "python-dateutil>=2.8.0",
+    "truststore>=0.9; python_version >= '3.10'",
 ]
 
 [project.optional-dependencies]

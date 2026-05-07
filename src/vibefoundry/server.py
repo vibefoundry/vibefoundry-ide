@@ -15,6 +15,16 @@ import time
 import urllib.parse
 from pathlib import Path
 
+# Honor the OS-native trust store (Windows cert store, macOS Keychain) so
+# corporate TLS-inspecting proxies — which re-sign traffic with an internal
+# CA that lives only in the OS store, not certifi — don't break HTTPS calls
+# to vibefoundry.ai. Must run before any SSLContext / httpx client is built.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 
 def _safe_float_or_none(v):
     """Coerce to JSON-safe float or None. NaN/Inf/None all become None (shown blank in UI)."""
