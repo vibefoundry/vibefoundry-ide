@@ -448,6 +448,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
 
   const ext = node.extension?.toLowerCase()
   const isRunnable = !node.isDirectory && ['.py', '.sh', '.bat'].includes(ext)
+  const isRunCode = !node.isDirectory && ['.py', '.sh'].includes(ext)
   const isConvertible = !node.isDirectory && ['.csv', '.xlsx', '.xls'].includes(ext)
 
   const handleCopyRunCommand = async () => {
@@ -467,6 +468,29 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
     } catch (err) {
       console.error('Failed to copy:', err)
     }
+  }
+
+  // Run the script in a fresh native terminal window (.py / .sh only)
+  const handleRunCode = async () => {
+    const absPath = projectPath ? `${projectPath}/${node.path}` : node.path
+    let command
+    if (ext === '.py') command = `python "${absPath}"`
+    else if (ext === '.sh') command = `bash "${absPath}"`
+    else return
+
+    const dirPath = absPath.includes('/')
+      ? absPath.slice(0, absPath.lastIndexOf('/'))
+      : absPath
+    try {
+      await fetch('/api/terminal/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: projectPath || dirPath, command })
+      })
+    } catch (err) {
+      console.error('Failed to run code:', err)
+    }
+    onClose()
   }
 
   // Show run command option for Python files even in read-only mode
@@ -503,6 +527,15 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
       {/* Run command for Python files */}
       {isRunnable && (
         <>
+          {isRunCode && (
+            <div className="context-menu-item" onClick={handleRunCode}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M6.271 5.055a.5.5 0 0 1 .52.038l3.5 2.5a.5.5 0 0 1 0 .814l-3.5 2.5A.5.5 0 0 1 6 10.5v-5a.5.5 0 0 1 .271-.445z"/>
+              </svg>
+              Run Code
+            </div>
+          )}
           <div className="context-menu-item" onClick={handleCopyRunCommand}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M10.804 8 5 4.633v6.734L10.804 8zm.792-.696a.802.802 0 0 1 0 1.392l-6.363 3.692C4.713 12.69 4 12.345 4 11.692V4.308c0-.653.713-.998 1.233-.696l6.363 3.692z"/>

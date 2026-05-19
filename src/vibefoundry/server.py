@@ -436,21 +436,20 @@ async def launch_native_terminal(request: LaunchTerminalRequest):
         raise HTTPException(status_code=400, detail="Folder does not exist")
 
     if sys.platform == 'darwin':  # macOS
-        # Use AppleScript to open Terminal.app with commands
+        # Build the bash command, then escape it once for embedding in an
+        # AppleScript string literal. request.command can contain double
+        # quotes — e.g. python "/path with spaces/app.py" — which would
+        # otherwise terminate the AppleScript string early and break the run.
+        bash_cmd = f'cd "{folder_path}" && clear'
         if request.command:
-            script = f'''
-            tell application "Terminal"
-                activate
-                do script "cd \\"{folder_path}\\" && clear && {request.command}"
-            end tell
-            '''
-        else:
-            script = f'''
-            tell application "Terminal"
-                activate
-                do script "cd \\"{folder_path}\\" && clear"
-            end tell
-            '''
+            bash_cmd += f' && {request.command}'
+        escaped = bash_cmd.replace('\\', '\\\\').replace('"', '\\"')
+        script = (
+            'tell application "Terminal"\n'
+            '    activate\n'
+            f'    do script "{escaped}"\n'
+            'end tell'
+        )
         subprocess.run(['osascript', '-e', script], check=True)
         return {"status": "ok", "message": "Terminal launched"}
     elif sys.platform == 'win32':  # Windows
