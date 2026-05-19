@@ -1840,6 +1840,52 @@ async def delete_file(request: DeleteFileRequest):
     return {"success": True, "path": request.path}
 
 
+class RevealFileRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/files/reveal")
+async def reveal_file(request: RevealFileRequest):
+    """Reveal a file or folder in the OS file manager (desktop only).
+
+    macOS/Windows highlight the item itself; Linux has no portable
+    "select this file" command, so it opens the containing folder.
+    """
+    import subprocess
+
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / request.path
+
+    # Security check - ensure path is within project folder
+    try:
+        resolved = file_path.resolve()
+        resolved.relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not resolved.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        if sys.platform == 'darwin':
+            # -R reveals and selects the item in Finder
+            subprocess.run(["open", "-R", str(resolved)], check=True)
+        elif sys.platform == 'win32':
+            # /select, opens Explorer with the item highlighted.
+            # explorer.exe returns exit code 1 even on success, so no check.
+            subprocess.run(["explorer", f"/select,{resolved}"])
+        else:
+            # Linux: no portable per-file select — open the containing folder
+            target = resolved if resolved.is_dir() else resolved.parent
+            subprocess.run(["xdg-open", str(target)], check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        raise HTTPException(status_code=500, detail=f"Could not open file manager: {e}")
+
+    return {"success": True, "path": request.path}
+
+
 class RenameRequest(BaseModel):
     oldPath: str
     newName: str

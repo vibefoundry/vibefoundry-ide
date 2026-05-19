@@ -491,6 +491,15 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
       className="context-menu"
       style={{ left: position.x, top: position.y }}
     >
+      {/* Reveal the item in the OS file manager (Finder / Explorer) */}
+      <div className="context-menu-item" onClick={() => onAction('reveal', node)}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3H14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H2.5a2 2 0 0 1-2-2V3.87z"/>
+        </svg>
+        Open in Folder
+      </div>
+      <div className="context-menu-divider" />
+
       {/* Run command for Python files */}
       {isRunnable && (
         <>
@@ -839,6 +848,19 @@ const FileTree = ({
     closeContextMenu()
 
     switch (action) {
+      case 'reveal':
+        // Open the file/folder in the laptop's native file manager
+        try {
+          await fetch('/api/files/reveal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: node.path })
+          })
+        } catch (err) {
+          console.error('Failed to reveal file:', err)
+        }
+        break
+
       case 'rename':
         setRenamingPath(node.path)
         setRenameValue(node.name)
