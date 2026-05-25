@@ -18,23 +18,38 @@ You are working in the project root with full access to all project files includ
 
 ## Which Track? — Pick One Before You Start
 
-Every project falls into one of three tracks. **Pick the track before writing any code**, then follow that track's dedicated section below. The rules *above* this section (planning, task continuity, folder structure, "input is sacred") apply to all three tracks.
+Every project falls into one of four tracks. **Pick the track before writing any code**, then follow that track's dedicated section below. The rules *above* this section (planning, task continuity, folder structure, "input is sacred") apply to all four tracks.
 
 | Track | When to use | What it produces |
 |---|---|---|
 | **1. Python Scripts** | Data processing, analysis, cleaning, aggregation, visualization — anything that reads input, transforms it, writes output | `.parquet` / `.png` files in `output_folder/{task}/` |
 | **2. Progressive Web App** (DuckDB-WASM + React) | Interactive dashboards or explorers over large static data, distributable as a zip-and-share folder that runs entirely in the user's browser | A self-contained folder in `output_folder/{app_name}/` with launcher scripts |
-| **3. Full-Stack App** (React + Python backend) | Apps that need a live server at runtime — API calls, RAG/LLM, auth, mutations, external services, secrets | A running dev server pair (frontend + backend) with launcher scripts |
+| **3. PWA + Python Runtime** (React + Python backend) | Apps that need a live server at runtime — API calls, RAG/LLM, auth, mutations, external services, secrets. Same React UI pattern as Track 2 PWAs, plus a local Python backend. | A running dev server pair (frontend + backend) with launcher scripts |
+| **4. Building Agents** (LLM-in-the-loop) | Per-record processing through an LLM — extraction, classification, vision, code generation, summarization — with prompts, retries, and structured output | Structured records / ledgers + per-record archives in `output_folder/{app_name}/` |
 
 ### How to pick
 
+- **Processes records through an LLM** — extraction, classification, vision, code generation, narration — one record at a time, with prompts and retries? → **Track 4** (check this first; an agent also has "no interaction beyond running it," so it would otherwise fall through to Track 1)
 - **No user interaction beyond running the script?** → **Track 1**
 - **Interactive UI, but all logic can run against static Parquet files in the browser?** → **Track 2**
 - **Needs a server to exist at runtime** (external APIs, secrets, RAG, mutations, auth)? → **Track 3**
 
-When the user's request is ambiguous (e.g., "build me a dashboard"), ask: *"Is this a static dashboard over existing Parquet data (PWA), or does it need a backend for live data / API calls (full-stack)?"* — then proceed based on the answer.
+When the user's request is ambiguous (e.g., "build me a dashboard"), ask: *"Is this a static dashboard over existing Parquet data (PWA), or does it need a Python runtime for live data / API calls (PWA + Python Runtime)?"* — then proceed based on the answer.
 
 Once the track is chosen, only the sections for that track apply. Don't mix patterns across tracks (e.g., don't use Track 1's `app.py` + step naming for Track 3's backend, and don't create Track 3 launcher scripts for a Track 1 task).
+
+## File Naming by Track — Numbered Steps Are For Linear Pipelines Only
+
+The `step1_*.py` / `step2_*.py` / `step3_*.py` naming convention is **reserved for Track 1 data-processing pipelines**, where the number encodes a fixed file-to-file handoff (step2 reads the parquet step1 wrote, in that order). Anywhere else the number lies — there's no ordered handoff to encode.
+
+**Every other track names its `.py` files by role, not by number.** For Track 4 agents and any other non-linear processing, each distinct task gets its own `.py` file named for what it does (e.g. `prompt.py`, `retry.py`, `parse.py`, `export.py`) and `app.py` composes them by calling their functions. Do not number these files — numbering asserts an ordering the structure doesn't implement, and makes the role of each file harder to read at a glance. One task per file; the filename tells you what the task is.
+
+| Track | File naming inside `app_folder/scripts/{app_name}/` |
+|---|---|
+| 1. Python Scripts (linear pipeline) | `app.py` + `step1_*.py`, `step2_*.py`, … — numbered, because each step reads the previous step's output file |
+| 2. PWA | No per-task `.py` files in the app source — JS/HTML/CSS, plus the `app.py` build script and dev helpers under `app_core/` |
+| 3. PWA + Python Runtime | Backend preserves the source pipeline/agent's `.py` filenames — see "Preserve original .py filenames" inside the Track 3 section |
+| 4. Building Agents | Role-named: `app.py` + `prompt.py`, `retry.py`, `parse.py`, `export.py`, … — never `step1_*.py` |
 
 ## Folder Structure
 
@@ -54,7 +69,7 @@ project_folder/           <- You are here
 
 - **Track 1 — Python scripts:** `app_folder/scripts/{task_name}/` contains `app.py` + `step1_*.py`, `step2_*.py`, etc.
 - **Track 2 — PWA (DuckDB-WASM + React):** `app_folder/scripts/{app_name}/` contains the build script (`app.py`) **and** the PWA source files (`index.html`, `css/`, `js/`).
-- **Track 3 — Full-Stack (React + Python backend):** `app_folder/scripts/{app_name}/` contains `backend/`, `frontend/`, and the launcher scripts (`setup.sh`/`run_app.sh`/`clear_cache.sh` + `.bat` equivalents).
+- **Track 3 — PWA + Python Runtime (React + Python backend):** `app_folder/scripts/{app_name}/` contains `backend/`, `frontend/`, and the launcher scripts (`setup.sh`/`run_app.sh`/`clear_cache.sh` + `.bat` equivalents).
 
 **Never put app code at the top of `app_folder/`, at the project root, or anywhere outside `app_folder/scripts/`.** If you find yourself creating `app_folder/{app_name}/` or top-level `backend/` and `frontend/` folders, stop — move them under `app_folder/scripts/{app_name}/` instead. The only top-level folders allowed inside `app_folder/` are `scripts/` and `meta_data/`.
 
@@ -68,7 +83,7 @@ What `run_app` does varies by track:
 |---|---|
 | **Track 1 — Python pipeline** | `cd` into the task folder and `python app.py` (the orchestrator that runs `step1_*.py`, `step2_*.py`, …) |
 | **Track 2 — PWA** | Runs `python build_app_package.py` to rebuild the output package, then launches the corresponding OS launcher inside `output_folder/{app_name}/` (`mac_start.sh` or `pc_start.bat`) so the developer sees the freshly built app immediately |
-| **Track 3 — Full-Stack** | Reserves two free ports, then runs the backend and frontend concurrently (see Track 3 launcher template below). Track 3 also gets `setup.sh`/`.bat` and `clear_cache.sh`/`.bat` for dependency management. |
+| **Track 3 — PWA + Python Runtime** | Reserves two free ports, then runs the backend and frontend concurrently (see Track 3 launcher template below). Track 3 also gets `setup.sh`/`.bat` and `clear_cache.sh`/`.bat` for dependency management. |
 
 Both `.sh` files must be `chmod +x` by the build/setup process so they're executable. The `.bat` and `.sh` files always live alongside each other inside the task folder.
 
@@ -79,6 +94,52 @@ Both `.sh` files must be `chmod +x` by the build/setup process so they're execut
 All transformations, merges, cleaning, filtering, deduplication, reformatting, and any other processing must produce **new files in `output_folder/`** — never edit the originals. If a script needs "cleaned" data, it reads from `input_folder/`, cleans it, and writes the result to `output_folder/`. The input stays pristine.
 
 This is a hard rule with no exceptions. Even if the user says "fix the data" or "clean the CSV," that means: read the input, transform it, and save the result as output. Never write back to `input_folder/`.
+
+## API Keys Live in a `.env` File at the Top of the App Folder
+
+Every app that needs an API key keeps a single `.env` file at the **top of its own folder** — `app_folder/scripts/{app_name}/.env`, the same directory as `run_app.sh` (and as `backend/`/`frontend/` for a PWA + Python Runtime app). **Not** `app_folder/.env`, **not** the project root, **not** `input_folder/`. Keeping the key beside the launchers makes the whole app folder self-contained: move or zip it and the key travels with it.
+
+**Convention:**
+
+- **Location:** `app_folder/scripts/{app_name}/.env` — the app folder root, alongside `run_app.sh`/`run_app.bat`.
+- **Format:** standard `KEY=VALUE` lines, one per provider. No quotes needed.
+
+  ```
+  OPENAI_API_KEY=sk-...
+  ANTHROPIC_API_KEY=sk-ant-...
+  ```
+
+- **Reading:** load the `.env` into the process environment once at startup so SDKs (OpenAI, Anthropic, etc.) pick the key up automatically. A tiny hand-rolled loader avoids a `python-dotenv` dependency:
+
+  ```python
+  import os
+  from pathlib import Path
+
+  # App folder root = same dir as run_app.sh. Adjust the depth if this file is
+  # nested (e.g. a Track 3 backend/ module: use Path(__file__).resolve().parent.parent).
+  APP_DIR = Path(__file__).resolve().parent
+  env_path = APP_DIR / ".env"
+  if env_path.exists():
+      for line in env_path.read_text(encoding="utf-8").splitlines():
+          line = line.strip()
+          if line and not line.startswith("#") and "=" in line:
+              k, _, v = line.partition("=")
+              os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+  if not os.environ.get("OPENAI_API_KEY"):
+      raise RuntimeError(
+          "Missing OPENAI_API_KEY. Create a .env at the top of this app folder "
+          "(next to run_app.sh) containing: OPENAI_API_KEY=sk-..."
+      )
+  ```
+
+  The cloned templates already ship this loader as `prompt.py`'s `_load_dotenv()` — reuse it, don't re-invent it.
+
+**The VibeFoundry IDE shows `.env` files.** Although `.env` is normally a hidden dotfile, the IDE's file explorer surfaces it so the user can create and edit it in-app, no terminal needed. Point the user at the app folder and have them paste the key there.
+
+**Asking the user for the key:** if an app needs a key and the `.env` isn't there (or the variable is missing), stop and ask: *"This app needs an API key — create a `.env` file at the top of the app folder (next to `run_app.sh`) containing `OPENAI_API_KEY=sk-...`, then tell me to continue."* Never paste the key into a chat, into a tracked file, or onto a command line. The user adds it to `.env` themselves.
+
+**Don't commit the key to git** — ensure `.env` (and `**/.env` for the nested app folders) is in `.gitignore` before the initial commit.
 
 ## `templates/` Is Read-Only — Never Edit It
 
@@ -1182,9 +1243,22 @@ python app_core\serve.py
 
 ---
 
-# Track 3: Full-Stack Apps (React + Python Backend)
+# Track 3: PWA + Python Runtime
 
-**Use this track when the app needs a live backend at runtime** — API calls to external services, RAG/LLM integration, authentication, mutations that persist to a database, or anything else that can't run in a static browser bundle.
+**This is Track 2's PWA frontend + a local Python backend.** The React UI is the same PWA pattern as Track 2; the difference is that instead of querying static Parquet files in the browser, the frontend calls a Flask/FastAPI backend that can do anything Python can — external API calls, RAG/LLM integration, authentication, mutations, secrets, agentic processing.
+
+**Use this track when** the work can't run in a static browser bundle — anything requiring a live Python runtime at request time.
+
+**Distribution differs from Track 2.** Track 2 ships as zip-and-share with no Python on the recipient's machine. Track 3 requires Python installed locally (it's a developer/internal-tool distribution model, not zip-and-share).
+
+## Preserve original .py filenames in the backend
+
+When a Track 1 pipeline or a Track 4 agent moves behind a React UI here, the backend folder contains the **original `.py` files with their original names**. Don't rename them just because they're now sitting behind a Flask/FastAPI route — the filenames are how the user reads what the app actually does.
+
+- A Track 1 pipeline at `app_folder/scripts/sales_pipeline/{app.py, step1_clean_data.py, step2_merge.py, step3_analyze.py, step4_visualize.py}` becomes `app_folder/scripts/sales_app/backend/{app.py, step1_clean_data.py, step2_merge.py, step3_analyze.py, step4_visualize.py}`. The Flask routes import and call into the same step files.
+- A Track 4 agent at `app_folder/scripts/image_scanner/{app.py, prompt.py, retry.py, parse.py, export.py, instructions.json, output_schema.json}` becomes `app_folder/scripts/receipts_app/backend/{app.py, prompt.py, retry.py, parse.py, export.py, instructions.json, output_schema.json}`. The routes call into the same role-named modules.
+
+Add new files for HTTP-layer concerns (e.g. `routes.py`, `api.py`) — but never rename or collapse what's already there. Moving a pipeline or agent behind an HTTP layer doesn't change what each file's job is, so the filenames shouldn't change either.
 
 When asked to build a dashboard or interactive tool that needs a backend, first ask the user: **React + Python** or **Streamlit**?
 
@@ -1601,3 +1675,122 @@ python your_script.py
 cd "$(dirname "$0")"
 python your_script.py
 ```
+
+---
+
+# Building Agents
+
+**Use this track when the app is an agent** — an LLM-in-the-loop processor that handles records one at a time (a receipt, a document, an image, a row), builds a prompt, calls a model, validates and retries, and writes a structured result. This is the **fourth track**, alongside Python Scripts, PWA, and PWA + Python Runtime.
+
+An agent is **not** a Track 1 pipeline. Track 1 work is a linear `input → transform → transform → output` chain where order is fixed and each step hands a file to the next. An agent's work is a **set of named stages an orchestrator composes per record** — build a prompt, send it, retry, parse, export. Stages loop and branch; they don't march in a line.
+
+The canonical example is `image_scanner` — a receipt scanner that watches an inbox, sends each image to the OpenAI vision API, and writes a classification ledger plus a per-receipt archive folder.
+
+## ⚠️ Clone the template — don't build from scratch
+
+Like a Track 2 PWA, an agent is **cloned from a template, not written fresh.** The template lives at `templates/agentic_framework/`. For any Building Agents task: copy `templates/agentic_framework/` into `app_folder/scripts/{app_name}/`, then modify the modules and config to fit the user's prompt. Don't reinvent the orchestrator, the retry loop, or the prompt-loading machinery — the template already has them. (`templates/` is read-only — fork out of it, never edit it in place. See "`templates/` Is Read-Only".)
+
+## How to pick this track
+
+- **Reads input, transforms it, writes output, no model call?** → Track 1.
+- **Processes records through an LLM** — extraction, classification, vision, code generation, summarization — one record at a time, with prompts, retries, and structured output? → **Building Agents.**
+
+## Folder structure — role-named modules, not numbered steps
+
+Every agent lives in `app_folder/scripts/{app_name}/` like any other app. The module set:
+
+| File | Role |
+|---|---|
+| `app.py` | **Orchestrator.** Composes the named stages for each record. Owns intake (inbox watcher, queue, or one-shot run) and concurrency. Like Track 1's `app.py`, it orchestrates — but it calls **functions in role-named modules**, not numbered step scripts. |
+| `prompt.py` | Builds the instruction text and calls the model — build prompt, send, receive. |
+| `retry.py` | Wraps the model call; re-asks on a failed or invalid result, up to a per-template cap. |
+| `parse.py` | Turns the model's structured reply into output rows / a ledger. |
+| `export.py` | Writes the per-record deliverable (archive folder, JSON, a copy of the source). |
+| `instructions.json` | Prompt templates — system text, field rules, model, `max_retries`. |
+| `output_schema.json` | The JSON schema the model's reply must match (strict mode). |
+
+### Why named modules, not numbered steps
+
+Track 1 numbers its files (`step1_*.py`, `step2_*.py`) because the number is a **contract**: `step2` reads the `.parquet` file `step1` wrote. The number encodes a file-to-file dependency in a fixed order.
+
+Agent modules make no such promise. They are **roles, not slots**:
+
+- **One module spans several conceptual steps** — `prompt.py` builds, sends, *and* receives.
+- **Stages loop, they don't proceed** — `retry.py` wraps and re-invokes the model call; it isn't a step "after" it.
+- **No on-disk handoff** — modules pass Python objects via function calls orchestrated by `app.py`, not `.parquet` files between numbered scripts.
+
+So agent files are named by **what they do** (`prompt.py`, `retry.py`, `parse.py`, `export.py`). Numbering them would assert an ordering the structure doesn't implement. If a conceptual step order is worth recording, put it in the module docstrings — not the filenames.
+
+## Universal rules still apply
+
+Building Agents does not opt out of the project-wide rules:
+
+- **All outputs go under the task's own folder** — `output_folder/{app_name}/`. Never write to the root of `output_folder/`.
+- **`input_folder/` is sacred** — read source records from it, never modify them. Copy, don't move.
+- **Every task folder gets `run_app.sh` + `run_app.bat`** — see "Launcher Scripts" below.
+
+## Config files
+
+- **`instructions.json`** — a named set of prompt templates. Each entry carries the system prompt, per-field rules, the model id, and `max_retries`. Adding a new behavior is usually a new entry here, not new code.
+- **`output_schema.json`** — the JSON schema the model is constrained to (passed as `json_schema` strict response format). The prompt and the schema must stay in sync — derive shared values (e.g. an allowed-category list) from the schema so they can't drift.
+
+## Extending an agent — add stages as named modules
+
+When the user's prompt needs more than extract-and-store, add modules. The two common extensions:
+
+### Code generation
+
+To make an agent that writes and runs code against a table (e.g. "compute what % of spend was alcohol"):
+
+| File | Change |
+|---|---|
+| `metadata_scanner.py` | **New.** Profiles the target table — column names, dtypes, top-10 unique values per categorical column, min/max/median per continuous column. Code-gen must see the data's shape to write code that references real columns. |
+| `execute.py` | **New.** Runs the model-generated code in a subprocess/sandbox, captures stdout + stderr, and hands any traceback back to `retry`. Executing model-written code is the security-sensitive stage — always isolate it. |
+| `prompt.py` | **Modified.** `build_prompt` accepts the metadata profile and injects it into a code-gen prompt template. |
+| `retry.py` | **Modified.** The retry signal flips: instead of "reply is missing required fields," it becomes "the code threw — feed the traceback back and regenerate." The failure now originates in `execute`, so retry gains an `execute → retry` dependency. |
+| `instructions.json` | **Modified.** Add a code-gen template entry. |
+| `output_schema.json` | **Modified — and its role changes.** The reply is now *code*, not a record. Either constrain a thin envelope (`{ "code": "..." }`) or drop `json_schema` response format for the code-gen template entirely. |
+
+The defining structural change: an extraction agent's retry validates the reply *internally*; a code-gen agent's retry validates by *running the code*. Design the `execute ⇄ retry` feedback loop deliberately — it is the heart of a code-gen agent.
+
+### Narration
+
+To add a final stage that turns a result into a verbose, human-readable summary:
+
+| File | Change |
+|---|---|
+| `narrate.py` | **New.** Reads the analysis output, sends a **digest** (the metadata profile or the small result rows — never the raw table) to the model, requests free-form prose, and writes a `.md` / `.txt` narrative into `output_folder/{app_name}/`. |
+
+Narration is a **plain text completion — no `json_schema` response format**, since the goal is prose, not a record. It has nothing to re-ask for on a bad reply, so it relies on the OpenAI SDK's built-in `max_retries` for network resilience rather than the field-validation or code-execution retry loops.
+
+### Optional: `history.py`
+
+An attempt/audit log — records each model round (prompt, code, result) for a task. Useful for debugging code-gen agents, where you want to see what code ran and what it returned. Add it when the agent's runs are worth auditing.
+
+## Task-to-task chaining
+
+An agent's output is a table, and a table is valid input for another task. An agent's `output_folder/{app_name}/` files (e.g. a classification ledger) may be consumed as the **input** of a downstream Track 1 pipeline or another agent.
+
+This is a **task-to-task handoff** — the downstream task reads from another task's `output_folder/{task}/`, not from `input_folder/`. That is a sanctioned pattern: `input_folder/` holds *raw user data*; a prior task's `output_folder/{task}/` holds *derived data* and is a legitimate source for the next task.
+
+## Launcher Scripts (REQUIRED)
+
+Every agent task folder must contain `run_app.sh` and `run_app.bat` alongside `app.py` and the modules. Both just `cd` into the task folder and run the orchestrator:
+
+**`run_app.sh`:**
+```bash
+#!/bin/bash
+# Run: bash app_folder/scripts/{app_name}/run_app.sh
+cd "$(dirname "$0")"
+python app.py
+```
+
+**`run_app.bat`:**
+```batch
+@echo off
+REM Run: app_folder\scripts\{app_name}\run_app.bat
+cd /d "%~dp0"
+python app.py
+```
+
+`run_app.sh` must be `chmod +x`. No `setup.sh`/`clear_cache.sh` are needed — agents are pure-Python with no Node dependency surface.

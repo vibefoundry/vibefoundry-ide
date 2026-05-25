@@ -753,12 +753,14 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
 @app.post("/api/build")
 async def build_project():
     """Build the project structure - creates folders, cascades AGENTS.md, and
-    cascades the pwa_duckdb template tree.
+    cascades the clonable template trees (pwa_duckdb, agentic_framework,
+    pwa_python_backend).
 
-    Other template subfolders (geo_dashboard, trend_analytics_dashboard,
-    data_pipeline, etc.) are still NOT cascaded. To re-enable the full
-    template cascade later, swap the targeted pwa_duckdb fetch below for a
-    call to _cascade_templates_via_proxy() with no subpath.
+    Cascade is targeted to the CASCADE_TEMPLATES list below — other template
+    subfolders (geo_dashboard, trend_analytics_dashboard, data_pipeline, etc.)
+    are NOT cascaded. To cascade everything instead, swap the per-template
+    fetch loop below for a single _cascade_templates_via_proxy() call with no
+    subpath.
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -799,20 +801,24 @@ async def build_project():
         except Exception as e:
             print(f"[Build] Public AGENTS.md fallback also failed: {e}")
 
-    # Cascade pwa_duckdb template (everything, including .wasm/.parquet binaries)
-    # into <project>/templates/pwa_duckdb/. Authenticated-only — the public
+    # Cascade the clonable template trees (everything, including .wasm/.parquet
+    # binaries) into <project>/templates/<name>/. Authenticated-only — the public
     # static path doesn't expose a directory listing for recursive fetch.
-    pwa_duckdb_files: list[str] = []
+    CASCADE_TEMPLATES = ["pwa_duckdb", "agentic_framework", "pwa_python_backend"]
+    cascaded_files: dict[str, int] = {}
     if jwt:
-        try:
-            pwa_duckdb_files = await _cascade_templates_via_proxy(
-                state.project_folder / "templates",
-                jwt,
-                subpath="pwa_duckdb",
-            )
-            print(f"[Build] Cascaded {len(pwa_duckdb_files)} files from pwa_duckdb")
-        except Exception as e:
-            print(f"[Build] pwa_duckdb cascade failed: {e}")
+        for tmpl in CASCADE_TEMPLATES:
+            try:
+                written = await _cascade_templates_via_proxy(
+                    state.project_folder / "templates",
+                    jwt,
+                    subpath=tmpl,
+                )
+                cascaded_files[tmpl] = len(written)
+                print(f"[Build] Cascaded {len(written)} files from {tmpl}")
+            except Exception as e:
+                cascaded_files[tmpl] = 0
+                print(f"[Build] {tmpl} cascade failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
@@ -873,7 +879,8 @@ async def build_project():
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
         "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
-        "pwa_duckdb_files_cascaded": len(pwa_duckdb_files),
+        "templates_cascaded": cascaded_files,
+        "pwa_duckdb_files_cascaded": cascaded_files.get("pwa_duckdb", 0),
         "git_initialized": git_initialized
     }
 
@@ -1177,6 +1184,13 @@ TREE_BLACKLIST = {
 }
 
 
+def _is_env_file(name: str) -> bool:
+    """`.env` files are hidden dotfiles, but the IDE surfaces them anyway so
+    users can paste their API keys straight into one. Matches `.env`,
+    `.env.local`, `.env.production`, etc."""
+    return name == '.env' or name.startswith('.env.')
+
+
 def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_app_folder: bool = False) -> dict:
     """Build a file tree recursively"""
     if deleted_files is None:
@@ -1198,8 +1212,8 @@ def build_file_tree(path: Path, base_path: Path, deleted_files: list = None, in_
         entering_app_folder = in_app_folder or path.name == "app_folder"
         try:
             for item in sorted(path.iterdir()):
-                # Skip hidden files
-                if item.name.startswith('.'):
+                # Skip hidden files — except .env files, where users paste keys
+                if item.name.startswith('.') and not _is_env_file(item.name):
                     continue
                 # Skip blacklisted directories
                 if item.is_dir() and item.name in TREE_BLACKLIST:

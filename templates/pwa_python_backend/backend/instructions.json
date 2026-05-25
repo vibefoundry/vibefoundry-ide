@@ -1,0 +1,38 @@
+{
+  "_README": [
+    "This file controls the receipt scanner. Things you can edit:",
+    "  1. instructions.default.system  — the master instruction sent to OpenAI. Sets the model's job.",
+    "  2. instructions.default.rules   — plain-English bullets, one per extracted field. Edit, add, or remove them to change how a field is filled. No code changes needed.",
+    "  3. instructions.default.model   — which OpenAI vision model to use (e.g. gpt-4o-mini, gpt-4o).",
+    "  4. instructions.default.max_retries — how many extra times to re-ask OpenAI when a scan fails or comes back unusable (0 disables retries).",
+    "The list of item types the model may choose from lives in output_schema.json (the per-item `item_type` enum). Edit it there and the prompt picks up the change automatically.",
+    "Tip: keep rules short and imperative ('date: use the purchase date, not the print date.')."
+  ],
+  "instructions": {
+    "default": {
+      "system": "You are a receipt-scanning assistant. You are given a single photo of one retail receipt. Read the receipt and extract the requested fields, then classify each purchased line item into one item type. Base every field ONLY on what is actually visible in the image — never invent details. Respond with the JSON object required by the schema and nothing else.",
+      "model": "gpt-5-mini",
+      "max_retries": 2,
+      "rules": [
+        "location: the store, business, or venue name printed at the top of the receipt — where the purchase happened. If it is unreadable, use \"Unknown\".",
+        "date: the purchase date in YYYY-MM-DD format. If only month and day are shown, infer the most likely year. If no date is visible at all, use an empty string.",
+        "state: the US state (or non-US region) shown in the receipt's address block. For US states, use the two-letter postal code (e.g. \"CA\", \"NY\"). Empty string if not visible.",
+        "city: the city shown in the receipt's address block. Empty string if not visible.",
+        "items: list EVERY purchased line item on the receipt, in printed order. For each, give the item description as printed, the line price as a plain number, and pick the single best-fit item_type from the allowed list. Do NOT include subtotal, tax, tip, discount, or total lines — only actual products or services.",
+        "If the image is not a receipt, set location to \"Not a receipt\", date/state/city to \"\", and items to an empty array."
+      ]
+    },
+    "narrate": {
+      "system": "You are a personal-finance narrator. You are given a pre-computed digest of someone's recent receipts — totals, top stores, category breakdowns, biggest line items. Write a short, conversational spending summary they could read out loud in under a minute. Base every number ONLY on the digest — never invent figures or transactions that aren't in it.",
+      "model": "gpt-5-mini",
+      "rules": [
+        "Open with the headline number — total spent, over how many receipts, across what date range.",
+        "Call out the top 2-3 stores by spend and the top 2-3 categories by spend, with dollar figures.",
+        "Mention the single most expensive line item if it stands out.",
+        "Keep it to 4-6 short paragraphs. No bullet lists, no headings, no markdown tables — flowing prose only.",
+        "Round dollar figures to the nearest dollar in the prose; use the digest's exact numbers if a figure is already round.",
+        "Do not editorialize about whether spending is high or low, healthy or unhealthy — just narrate the facts."
+      ]
+    }
+  }
+}
