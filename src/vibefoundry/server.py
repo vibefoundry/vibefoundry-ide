@@ -750,17 +750,29 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
     return written
 
 
+async def _list_proxy_template_dirs(jwt: str) -> list[str]:
+    """List the top-level directory names under templates/ on the proxy.
+
+    Build cascades whatever folders this returns, so a new template ships by
+    just adding a folder at the source — no client update required. Top-level
+    files (e.g. AGENTS.md) are ignored here; AGENTS.md is fetched separately.
+    """
+    auth_headers = {"Authorization": f"Bearer {jwt}"}
+    timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        res = await client.get(PROXY_BASE_URL, headers=auth_headers)
+        res.raise_for_status()
+        return [e["name"] for e in res.json() if e.get("type") == "dir"]
+
+
 @app.post("/api/build")
 async def build_project():
     """Build the project structure - creates folders, cascades AGENTS.md, and
-    cascades the clonable template trees (pwa_duckdb, agentic_framework,
-    pwa_python_backend).
+    cascades every clonable template tree found at the source.
 
-    Cascade is targeted to the CASCADE_TEMPLATES list below — other template
-    subfolders (geo_dashboard, trend_analytics_dashboard, data_pipeline, etc.)
-    are NOT cascaded. To cascade everything instead, swap the per-template
-    fetch loop below for a single _cascade_templates_via_proxy() call with no
-    subpath.
+    The template list is discovered dynamically from the proxy (see
+    _list_proxy_template_dirs) rather than hardcoded — so adding a new template
+    is just dropping a folder at the source; no client update is required.
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -801,13 +813,19 @@ async def build_project():
         except Exception as e:
             print(f"[Build] Public AGENTS.md fallback also failed: {e}")
 
-    # Cascade the clonable template trees (everything, including .wasm/.parquet
-    # binaries) into <project>/templates/<name>/. Authenticated-only — the public
-    # static path doesn't expose a directory listing for recursive fetch.
-    CASCADE_TEMPLATES = ["pwa_duckdb", "agentic_framework", "pwa_python_backend"]
+    # Cascade every template tree present at the source (dynamic — the folder
+    # list is discovered from the proxy, not hardcoded, so new templates ship
+    # without a client update). Each tree is fetched recursively, binaries
+    # included. Authenticated-only — the public static path doesn't expose a
+    # directory listing for recursive fetch.
     cascaded_files: dict[str, int] = {}
     if jwt:
-        for tmpl in CASCADE_TEMPLATES:
+        try:
+            template_dirs = await _list_proxy_template_dirs(jwt)
+        except Exception as e:
+            template_dirs = []
+            print(f"[Build] could not list templates from proxy: {e}")
+        for tmpl in template_dirs:
             try:
                 written = await _cascade_templates_via_proxy(
                     state.project_folder / "templates",
