@@ -10,6 +10,7 @@ import asyncio
 import base64
 import secrets
 import struct
+import shutil
 import signal
 import time
 import urllib.parse
@@ -70,7 +71,7 @@ import polars as pl
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -789,23 +790,19 @@ async def _cascade_top_level_file(dest_dir: Path, jwt: str, name: str) -> bool:
 
 @app.post("/api/build")
 async def build_project():
-    """Build the project structure - creates folders, cascades AGENTS.md, and
-    cascades every clonable template tree found at the source.
-
-    The template list is discovered dynamically from the proxy (see
-    _list_proxy_template_entries) rather than hardcoded — so adding a new
-    template folder or a top-level asset (catalog.json, icons) ships by just
-    dropping it at the source; no client update is required.
+    """Build the project structure — creates the input/output/app folders and
+    fetches AGENTS.md. Templates are no longer cascaded here; the user picks
+    them explicitly via /api/templates/download.
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
     # Create folder structure (input_folder/, output_folder/, app_folder/, etc.)
     folders = setup_project_structure(state.project_folder)
-    templates_written: list[str] = []
+    agents_md_written = False
 
-    # Fetch JUST AGENTS.md — try the authenticated proxy first, then fall
-    # back to the public website cascade for unauthenticated users.
+    # Fetch AGENTS.md — try the authenticated proxy first, then fall back to
+    # the public website path for unauthenticated users.
     stored = _read_stored_token()
     jwt = stored["token"] if stored else ""
     agents_dest = state.project_folder / "AGENTS.md"
@@ -822,56 +819,19 @@ async def build_project():
                 )
                 if res.status_code == 200:
                     agents_dest.write_bytes(res.content)
-                    templates_written = ["AGENTS.md"]
+                    agents_md_written = True
         except Exception as e:
             print(f"[Build] Authenticated AGENTS.md fetch failed ({e}); falling back to public path")
 
-    if not templates_written:
+    if not agents_md_written:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/AGENTS.md")
                 if res.status_code == 200:
                     agents_dest.write_bytes(res.content)
-                    templates_written = ["AGENTS.md"]
+                    agents_md_written = True
         except Exception as e:
             print(f"[Build] Public AGENTS.md fallback also failed: {e}")
-
-    # Cascade every template tree present at the source (dynamic — the folder
-    # list is discovered from the proxy, not hardcoded, so new templates ship
-    # without a client update). Each tree is fetched recursively, binaries
-    # included. Authenticated-only — the public static path doesn't expose a
-    # directory listing for recursive fetch.
-    cascaded_files: dict[str, int] = {}
-    cascaded_top_level: list[str] = []
-    if jwt:
-        try:
-            template_dirs, template_files = await _list_proxy_template_entries(jwt)
-        except Exception as e:
-            template_dirs, template_files = [], []
-            print(f"[Build] could not list templates from proxy: {e}")
-        for tmpl in template_dirs:
-            try:
-                written = await _cascade_templates_via_proxy(
-                    state.project_folder / "templates",
-                    jwt,
-                    subpath=tmpl,
-                )
-                cascaded_files[tmpl] = len(written)
-                print(f"[Build] Cascaded {len(written)} files from {tmpl}")
-            except Exception as e:
-                cascaded_files[tmpl] = 0
-                print(f"[Build] {tmpl} cascade failed: {e}")
-        for fname in template_files:
-            try:
-                await _cascade_top_level_file(
-                    state.project_folder / "templates",
-                    jwt,
-                    fname,
-                )
-                cascaded_top_level.append(fname)
-                print(f"[Build] Cascaded top-level templates/{fname}")
-            except Exception as e:
-                print(f"[Build] top-level templates/{fname} cascade failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
@@ -932,11 +892,164 @@ async def build_project():
         "success": True,
         "folders": {k: str(v) for k, v in folders.items()},
         "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
-        "templates_cascaded": cascaded_files,
-        "templates_top_level_cascaded": cascaded_top_level,
-        "dashboard_pwa_duckdb_files_cascaded": cascaded_files.get("dashboard_pwa_duckdb", 0),
         "git_initialized": git_initialized
     }
+
+
+# --- Template selective download / delete -----------------------------------
+
+
+def _require_jwt() -> str:
+    stored = _read_stored_token()
+    jwt = stored["token"] if stored else ""
+    if not jwt:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return jwt
+
+
+def _restart_watcher() -> None:
+    if not state.project_folder:
+        return
+    if state.watcher:
+        state.watcher.stop()
+    state.watcher = FileWatcher(
+        state.project_folder,
+        on_data_change=notify_data_change,
+        on_script_change=notify_script_change,
+        on_output_file_change=notify_output_file_change,
+    )
+
+
+@app.get("/api/templates/catalog")
+async def get_templates_catalog():
+    """Fetch catalog.json live from the proxy. Not written to disk — the
+    picker UI reads it on every open so new templates appear without an IDE
+    update."""
+    jwt = _require_jwt()
+    timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            res = await client.get(
+                f"{PROXY_BASE_URL}/catalog.json",
+                headers={
+                    "Authorization": f"Bearer {jwt}",
+                    "Accept": "application/vnd.github.raw",
+                },
+            )
+            res.raise_for_status()
+            return res.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Proxy error fetching catalog: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch catalog: {e}")
+
+
+_ICON_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
+
+
+@app.get("/api/templates/icon/{name}")
+async def get_template_icon(name: str):
+    """Stream a template icon from the proxy. JWT-authenticated; no disk write."""
+    if not name or "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid icon name")
+    ext = Path(name).suffix.lower()
+    if ext not in _ICON_MIME:
+        raise HTTPException(status_code=400, detail="Unsupported icon type")
+    jwt = _require_jwt()
+    timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            res = await client.get(
+                f"{PROXY_BASE_URL}/{name}",
+                headers={
+                    "Authorization": f"Bearer {jwt}",
+                    "Accept": "application/vnd.github.raw",
+                },
+            )
+            res.raise_for_status()
+            return Response(content=res.content, media_type=_ICON_MIME[ext])
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Icon not found: {name}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch icon: {e}")
+
+
+class TemplateDownloadRequest(BaseModel):
+    template_id: str
+
+
+def _valid_template_id(tid: str) -> bool:
+    if not tid:
+        return False
+    return all(c.islower() or c.isdigit() or c == "_" for c in tid)
+
+
+@app.post("/api/templates/download")
+async def download_template(req: TemplateDownloadRequest):
+    """Download one template subtree into {project}/templates/{template_id}/.
+    Repeated downloads overwrite that subfolder; other downloaded templates
+    are untouched."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+    if not _valid_template_id(req.template_id):
+        raise HTTPException(status_code=400, detail="Invalid template_id")
+    jwt = _require_jwt()
+
+    templates_root = state.project_folder / "templates"
+    templates_root.mkdir(parents=True, exist_ok=True)
+
+    try:
+        written = await _cascade_templates_via_proxy(
+            templates_root,
+            jwt,
+            subpath=req.template_id,
+        )
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Proxy error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Download failed: {e}")
+
+    generate_metadata(state.project_folder)
+    _restart_watcher()
+    if state.watcher:
+        await state.watcher.start_async()
+
+    return {
+        "success": True,
+        "template_id": req.template_id,
+        "files_cascaded": len(written),
+    }
+
+
+@app.delete("/api/templates")
+async def delete_templates():
+    """Remove the entire templates/ folder from the current project."""
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    templates_dir = state.project_folder / "templates"
+    try:
+        templates_dir.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    deleted = False
+    if templates_dir.exists():
+        shutil.rmtree(templates_dir)
+        deleted = True
+
+    generate_metadata(state.project_folder)
+    _restart_watcher()
+    if state.watcher:
+        await state.watcher.start_async()
+
+    return {"success": True, "deleted": deleted}
 
 
 @app.get("/api/scripts")

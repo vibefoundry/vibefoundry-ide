@@ -3,6 +3,7 @@ import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
+import TemplatePickerModal from './components/TemplatePickerModal'
 import {
   getFileType,
   getExtension
@@ -77,6 +78,15 @@ function App() {
   const [saveStatus, setSaveStatus] = useState(null) // 'saving', 'saved', 'error'
   const [showBuildModal, setShowBuildModal] = useState(false)
   const [isScaffolding, setIsScaffolding] = useState(false)
+  const [showTemplatesMenu, setShowTemplatesMenu] = useState(false)
+  const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadingId, setDownloadingId] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [catalog, setCatalog] = useState(null)
+  const [catalogError, setCatalogError] = useState(null)
+  const [loadingCatalog, setLoadingCatalog] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(() => localStorage.getItem('previewUrl') || '')
   const [deletedFileToast, setDeletedFileToast] = useState(null)
@@ -94,6 +104,18 @@ function App() {
   const suppressAnimationsRef = useRef(false)
   const autoPreviewDebounceRef = useRef(null)
   const isAutoPreviewingRef = useRef(false)
+  const templatesMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!showTemplatesMenu) return
+    const handler = (e) => {
+      if (templatesMenuRef.current && !templatesMenuRef.current.contains(e.target)) {
+        setShowTemplatesMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showTemplatesMenu])
 
   // Sidebar resize handlers - use refs to avoid stale closures
   const isResizingRef = useRef(false)
@@ -625,6 +647,75 @@ function App() {
     }
   }
 
+  const loadCatalog = useCallback(async () => {
+    setLoadingCatalog(true)
+    setCatalogError(null)
+    try {
+      const res = await fetch('/api/templates/catalog')
+      if (res.status === 401) {
+        setCatalogError('Sign in to browse templates.')
+        setCatalog(null)
+        return
+      }
+      if (!res.ok) {
+        throw new Error(`Catalog fetch failed (${res.status})`)
+      }
+      const data = await res.json()
+      setCatalog(data)
+    } catch (err) {
+      console.error('Failed to load catalog:', err)
+      setCatalogError('Could not load template catalog.')
+      setCatalog(null)
+    } finally {
+      setLoadingCatalog(false)
+    }
+  }, [])
+
+  const openDownloadModal = () => {
+    setShowDownloadModal(true)
+    loadCatalog()
+  }
+
+  const handleDownloadTemplate = async (templateId) => {
+    if (!projectPath || !canWrite || isDownloading) return
+    setIsDownloading(true)
+    setDownloadingId(templateId)
+    try {
+      const res = await fetch('/api/templates/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: templateId }),
+      })
+      if (!res.ok) {
+        throw new Error(`Download failed (${res.status})`)
+      }
+      await handleRefresh()
+      setShowDownloadModal(false)
+    } catch (err) {
+      console.error('Failed to download template:', err)
+    } finally {
+      setIsDownloading(false)
+      setDownloadingId(null)
+    }
+  }
+
+  const handleDeleteTemplates = async () => {
+    if (!projectPath || !canWrite || isDeleting) return
+    setIsDeleting(true)
+    try {
+      const res = await fetch('/api/templates', { method: 'DELETE' })
+      if (!res.ok) {
+        throw new Error(`Delete failed (${res.status})`)
+      }
+      await handleRefresh()
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      console.error('Failed to delete templates:', err)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   // Create new folder in project root
   const handleCreateNewFolder = async () => {
     if (!projectPath || !canWrite || !newFolderName.trim()) return
@@ -766,6 +857,41 @@ function App() {
             <button className="btn-flat" onClick={() => setShowBuildModal(true)}>
               Build
             </button>
+            <div className="templates-menu-wrap" ref={templatesMenuRef}>
+              <button
+                className="btn-flat"
+                onClick={() => setShowTemplatesMenu((v) => !v)}
+                disabled={!projectPath || !canWrite}
+                aria-haspopup="menu"
+                aria-expanded={showTemplatesMenu}
+              >
+                Templates <span className="templates-menu-caret">▾</span>
+              </button>
+              {showTemplatesMenu && (
+                <div className="templates-menu" role="menu">
+                  <button
+                    className="templates-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowTemplatesMenu(false)
+                      openDownloadModal()
+                    }}
+                  >
+                    Download templates…
+                  </button>
+                  <button
+                    className="templates-menu-item danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowTemplatesMenu(false)
+                      setShowDeleteConfirm(true)
+                    }}
+                  >
+                    Delete templates folder…
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="top-bar-section top-bar-center">
             <div className="view-tabs">
@@ -1015,6 +1141,51 @@ function App() {
               </button>
               <button className="btn-primary" onClick={handleBuildProject} disabled={isScaffolding}>
                 {isScaffolding ? 'Building...' : 'Build'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <TemplatePickerModal
+        open={showDownloadModal}
+        catalog={catalog}
+        catalogError={catalogError}
+        loadingCatalog={loadingCatalog}
+        isDownloading={isDownloading}
+        downloadingId={downloadingId}
+        onSelect={handleDownloadTemplate}
+        onClose={() => setShowDownloadModal(false)}
+      />
+
+      {showDeleteConfirm && (
+        <div
+          className="dialog-overlay"
+          onClick={() => !isDeleting && setShowDeleteConfirm(false)}
+        >
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete templates folder?</h3>
+            <p>
+              This will remove the entire <strong>templates/</strong> folder,
+              including every downloaded template.
+            </p>
+            <p className="dialog-warning">
+              Anything you customized inside <strong>templates/</strong> will be lost.
+            </p>
+            <div className="dialog-actions">
+              <button
+                className="dialog-btn cancel"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="dialog-btn danger"
+                onClick={handleDeleteTemplates}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
           </div>
