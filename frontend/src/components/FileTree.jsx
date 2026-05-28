@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { createFolder, createFile, deleteEntry, renameEntry, moveEntry, getParentHandle } from '../utils/fileSystem'
 
 // Backend tree paths are project-relative POSIX (e.g. "templates",
-// "templates/pwa_duckdb/run_app.sh"). The leading-slash variants are kept in
+// "templates/dashboard_pwa_duckdb/run_app.sh"). The leading-slash variants are kept in
 // case any caller passes an absolute path. Used everywhere we need to gate
 // auto-expansion / writes against the read-only templates/ folder.
 const isTemplatesPath = (p) => {
