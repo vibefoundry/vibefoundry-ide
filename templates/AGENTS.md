@@ -86,8 +86,18 @@ What `run_app` does varies by track:
 | **Track 1 — Python pipeline** | `cd` into the task folder and `python app.py` (the orchestrator that runs `step1_*.py`, `step2_*.py`, …) |
 | **Track 2 — PWA** | Runs `python build_app_package.py` to rebuild the output package, then launches the corresponding OS launcher inside `output_folder/{app_name}/` (`mac_start.sh` or `pc_start.bat`) so the developer sees the freshly built app immediately |
 | **Track 3 — PWA + Python Runtime** | Reserves two free ports, then runs the backend and frontend concurrently (see Track 3 launcher template below). Track 3 also gets `setup.sh`/`.bat` and `clear_cache.sh`/`.bat` for dependency management. |
+| **Track 4 — LLM Agent** | `cd` into the task folder, auto-trigger `setup.sh` / `setup.bat` if any required Python dep is missing, then `python app.py`. |
 
 Both `.sh` files must be `chmod +x` by the build/setup process so they're executable. The `.bat` and `.sh` files always live alongside each other inside the task folder.
+
+### Dependency files
+
+Every task folder that imports third-party Python packages must ship a `requirements.txt` next to `run_app.sh`. For tracks that need it, a `setup.sh` / `setup.bat` pair handles an idempotent `pip install -r requirements.txt` (checks `pip show <pkg>` first; skips when already installed). `run_app.sh` / `.bat` auto-trigger setup when a sentinel package is missing so a fresh clone runs in one command. Per-track:
+
+- **Track 1** — `requirements.txt` lists whatever the pipeline imports. No `setup.sh`; students run `pip install -r requirements.txt` manually (single-shot pipelines, no daemon).
+- **Track 2** — Browser-based; the Python helpers (`serve.py`, `prepare_dev_assets.py`, `build_app_package.py`) are stdlib only, so `requirements.txt` exists but is a comment header only. No `setup.sh` needed.
+- **Track 3** — `backend/requirements.txt` for Python deps, `frontend/package.json` for Node. `setup.sh` / `.bat` install both.
+- **Track 4** — `requirements.txt` at task root (typically `openai`, `watchdog`, `pillow`). `setup.sh` / `.bat` install. `run_app` auto-triggers setup on missing deps.
 
 ## Input Data Is Sacred — Never Edit It
 
@@ -1809,13 +1819,58 @@ This is a **task-to-task handoff** — the downstream task reads from another ta
 
 ## Launcher Scripts (REQUIRED)
 
-Every agent task folder must contain `run_app.sh` and `run_app.bat` alongside `app.py` and the modules. Both just `cd` into the task folder and run the orchestrator:
+Every agent task folder must contain four launchers alongside `app.py` and the modules: `requirements.txt`, `setup.sh` / `setup.bat`, and `run_app.sh` / `run_app.bat`. `requirements.txt` lists the Python deps (the shipped baseline is `openai`, `watchdog`, `pillow`). `setup.sh` / `.bat` idempotently `pip install -r requirements.txt` — checking `pip show <pkg>` first and skipping when already installed. `run_app.sh` / `.bat` auto-triggers setup if any required dep is missing, then runs the orchestrator.
+
+**`requirements.txt`:**
+```
+openai
+watchdog
+pillow
+```
+
+**`setup.sh`:**
+```bash
+#!/bin/bash
+# Run: bash app_folder/scripts/{app_name}/setup.sh
+cd "$(dirname "$0")"
+
+echo "[1/1] Checking Python dependencies..."
+if pip show openai > /dev/null 2>&1 && pip show watchdog > /dev/null 2>&1 && pip show pillow > /dev/null 2>&1; then
+    echo "      Already installed, skipping."
+else
+    echo "      Installing Python dependencies..."
+    pip install -r requirements.txt
+fi
+```
+
+**`setup.bat`:**
+```batch
+@echo off
+REM Run: app_folder\scripts\{app_name}\setup.bat
+cd /d "%~dp0"
+
+echo [1/1] Checking Python dependencies...
+pip show openai >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    echo       Installing Python dependencies...
+    pip install -r requirements.txt
+) else (
+    echo       Already installed, skipping.
+)
+```
 
 **`run_app.sh`:**
 ```bash
 #!/bin/bash
 # Run: bash app_folder/scripts/{app_name}/run_app.sh
 cd "$(dirname "$0")"
+
+# Auto-trigger setup if any Python dep is missing.
+if ! pip show openai > /dev/null 2>&1 || ! pip show watchdog > /dev/null 2>&1 || ! pip show pillow > /dev/null 2>&1; then
+    echo "Python deps missing — running setup.sh..."
+    bash "$(dirname "$0")/setup.sh" || { echo "Setup failed."; exit 1; }
+fi
+
 python app.py
 ```
 
@@ -1824,7 +1879,22 @@ python app.py
 @echo off
 REM Run: app_folder\scripts\{app_name}\run_app.bat
 cd /d "%~dp0"
+
+REM Auto-trigger setup if any Python dep is missing.
+pip show openai >nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :need_setup
+pip show watchdog >nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :need_setup
+pip show pillow >nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :need_setup
+goto :run
+
+:need_setup
+echo Python deps missing - running setup.bat...
+call "%~dp0setup.bat" || (echo Setup failed. & exit /b 1)
+
+:run
 python app.py
 ```
 
-`run_app.sh` must be `chmod +x`. No `setup.sh`/`clear_cache.sh` are needed — agents are pure-Python with no Node dependency surface.
+`run_app.sh` and `setup.sh` must be `chmod +x`. If you add a third-party dep, update `requirements.txt` AND the three `pip show` checks (setup.sh, setup.bat, run_app.sh, run_app.bat) — keep them in sync so the sentinel check matches what's actually installed.
