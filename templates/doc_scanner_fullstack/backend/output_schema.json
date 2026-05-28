@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["location", "date", "state", "city", "items"],
+  "properties": {
+    "location": {
+      "type": "string",
+      "description": "The store, business, or venue name printed on the receipt — where the purchase happened. Use \"Unknown\" if unreadable, \"Not a receipt\" if the image is not a receipt."
+    },
+    "date": {
+      "type": "string",
+      "description": "Purchase date in YYYY-MM-DD format. Empty string if no date is visible."
+    },
+    "state": {
+      "type": "string",
+      "description": "US state (or non-US region) printed in the receipt's address block. Use the two-letter postal code for US states (e.g. \"CA\", \"NY\"). Empty string if not visible."
+    },
+    "city": {
+      "type": "string",
+      "description": "City printed in the receipt's address block. Empty string if not visible."
+    },
+    "items": {
+      "type": "array",
+      "description": "Every line item on the receipt, in the order printed. One entry per purchased product or service. Empty array if no line items are legible.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "price", "item_type"],
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "The item name or description exactly as printed on the receipt."
+          },
+          "price": {
+            "type": "number",
+            "description": "The amount charged for this line (the line total), as a plain number with no currency symbol."
+          },
+          "item_type": {
+            "type": "string",
+            "description": "The category of this individual item.",
+            "enum": [
+              "Food",
+              "Beverage",
+              "Alcohol",
+              "Groceries",
+              "Household",
+              "Personal Care",
+              "Clothing",
+              "Electronics",
+              "Office Supplies",
+              "Fuel",
+              "Service",
+              "Entertainment",
+              "Healthcare",
+              "Other"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

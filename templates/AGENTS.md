@@ -20,12 +20,14 @@ You are working in the project root with full access to all project files includ
 
 Every project falls into one of four tracks. **Pick the track before writing any code**, then follow that track's dedicated section below. The rules *above* this section (planning, task continuity, folder structure, "input is sacred") apply to all four tracks.
 
-| Track | When to use | What it produces |
-|---|---|---|
-| **1. Python Scripts** | Data processing, analysis, cleaning, aggregation, visualization — anything that reads input, transforms it, writes output | `.parquet` / `.png` files in `output_folder/{task}/` |
-| **2. Progressive Web App** (DuckDB-WASM + React) | Interactive dashboards or explorers over large static data, distributable as a zip-and-share folder that runs entirely in the user's browser | A self-contained folder in `output_folder/{app_name}/` with launcher scripts |
-| **3. PWA + Python Runtime** (React + Python backend) | Apps that need a live server at runtime — API calls, RAG/LLM, auth, mutations, external services, secrets. Same React UI pattern as Track 2 PWAs, plus a local Python backend. | A running dev server pair (frontend + backend) with launcher scripts |
-| **4. Building Agents** (LLM-in-the-loop) | Per-record processing through an LLM — extraction, classification, vision, code generation, summarization — with prompts, retries, and structured output | Structured records / ledgers + per-record archives in `output_folder/{app_name}/` |
+| Track | When to use | What it produces | Cascaded template |
+|---|---|---|---|
+| **1. Python Scripts** | Data processing, analysis, cleaning, aggregation, visualization — anything that reads input, transforms it, writes output | `.parquet` / `.png` files in `output_folder/{task}/` | *(none — write from scratch following this doc)* |
+| **2. Progressive Web App** (DuckDB-WASM + React) | Interactive dashboards or explorers over large static data, distributable as a zip-and-share folder that runs entirely in the user's browser | A self-contained folder in `output_folder/{app_name}/` with launcher scripts | `templates/dashboard_pwa_duckdb/` |
+| **3. PWA + Python Runtime** (React + Python backend) | Apps that need a live server at runtime — API calls, RAG/LLM, auth, mutations, external services, secrets. Same React UI pattern as Track 2 PWAs, plus a local Python backend. | A running dev server pair (frontend + backend) with launcher scripts | `templates/doc_scanner_fullstack/` |
+| **4. Building Agents** (LLM-in-the-loop) | Per-record processing through an LLM — extraction, classification, vision, code generation, summarization — with prompts, retries, and structured output | Structured records / ledgers + per-record archives in `output_folder/{app_name}/` | `templates/doc_scanner_backend/` |
+
+The cascaded template is the **fork point** for that track — clone it into `app_folder/scripts/{app_name}/` and modify, don't build from scratch. (Track 1 has no template because its structure is just `app.py` + numbered step files, fully documented in the Track 1 section below.)
 
 ### How to pick
 
@@ -661,9 +663,9 @@ That's it for Track 1 — no `setup.sh`/`clear_cache.sh` needed since there are 
 
 These apps are distributed as folders users launch with a `.bat` (Windows) or `.command` (Mac) file. No IT involvement required on the user's machine.
 
-## ⚠️ Read `templates/pwa_duckdb/CUSTOMIZE.md` first — that's your recipe.
+## ⚠️ Read `templates/dashboard_pwa_duckdb/CUSTOMIZE.md` first — that's your recipe.
 
-**Don't build a Track 2 PWA from scratch.** A complete, working DuckDB-WASM + React PWA template is already cascaded into your project at `templates/pwa_duckdb/`. Your job for any Track 2 task is to *clone it* into `app_folder/scripts/{task_name}/`, swap in the user's data, rewrite `app_config.json`, and stop. The full step-by-step lives in `templates/pwa_duckdb/CUSTOMIZE.md` — read that file before doing anything else. It tells you exactly which files to edit, which not to touch, and which inspection queries to run.
+**Don't build a Track 2 PWA from scratch.** A complete, working DuckDB-WASM + React PWA template is already cascaded into your project at `templates/dashboard_pwa_duckdb/`. Your job for any Track 2 task is to *clone it* into `app_folder/scripts/{task_name}/`, swap in the user's data, rewrite `app_config.json`, and stop. The full step-by-step lives in `templates/dashboard_pwa_duckdb/CUSTOMIZE.md` — read that file before doing anything else. It tells you exactly which files to edit, which not to touch, and which inspection queries to run.
 
 The rest of this Track 2 section (architecture overview, build script template, JS patterns, launcher details) is *reference material* — read it only if `CUSTOMIZE.md` doesn't answer a specific question. **Do not use the build-from-scratch instructions below to recreate what the template already provides.** Skipping the recipe and rewriting the template files (the build script, the launchers, `app.js`, `js/app.js`'s rendering logic) is the single biggest cause of Track 2 tasks blowing past their time budget.
 
@@ -1251,6 +1253,19 @@ python app_core\serve.py
 
 **Distribution differs from Track 2.** Track 2 ships as zip-and-share with no Python on the recipient's machine. Track 3 requires Python installed locally (it's a developer/internal-tool distribution model, not zip-and-share).
 
+## ⚠️ Cloning the agent-backed PWA template
+
+When the user's request is "a PWA that wraps an agent" — e.g. a receipts/document scanner with a web UI — **clone `templates/doc_scanner_fullstack/`** instead of building from scratch. It ships a complete Flask backend (which itself mirrors `templates/doc_scanner_backend/`'s five role-named modules) plus a React frontend that streams scan results over SSE.
+
+**After cloning**, in the new app folder (`app_folder/scripts/{app_name}/`):
+
+1. **Rename `.env.example` to `.env`** at the app root (sibling to `backend/` and `frontend/`). `backend/prompt.py`'s `_load_dotenv()` reads from `.env` — the rename activates it.
+2. Stop and ask the user for the API key: *"I cloned the agent-backed PWA template into `app_folder/scripts/{app_name}/` and renamed `.env.example` to `.env`. Open that `.env` in the IDE and paste your OpenAI key after `OPENAI_API_KEY=`, then tell me to continue."* Never paste keys into chat or files yourself.
+
+The backend uses the **self-contained file convention** inherited from Track 4 (see "Self-contained file convention" in the Building Agents section): uploads land in `backend/document_input/`, results land in `backend/agent_results/`. Do not "fix" these paths to point at the project-level `input_folder/`/`output_folder/` — the agent template is intentionally self-contained.
+
+For Track 3 apps that are **not** agent-backed (e.g. a PWA wrapping a Track 1 pipeline), build the backend from scratch using the Backend Template below and use the standard `input_folder/`/`output_folder/` convention — the self-contained rule only applies to agent backends.
+
 ## Preserve original .py filenames in the backend
 
 When a Track 1 pipeline or a Track 4 agent moves behind a React UI here, the backend folder contains the **original `.py` files with their original names**. Don't rename them just because they're now sitting behind a Flask/FastAPI route — the filenames are how the user reads what the app actually does.
@@ -1688,7 +1703,17 @@ The canonical example is `image_scanner` — a receipt scanner that watches an i
 
 ## ⚠️ Clone the template — don't build from scratch
 
-Like a Track 2 PWA, an agent is **cloned from a template, not written fresh.** The template lives at `templates/agentic_framework/`. For any Building Agents task: copy `templates/agentic_framework/` into `app_folder/scripts/{app_name}/`, then modify the modules and config to fit the user's prompt. Don't reinvent the orchestrator, the retry loop, or the prompt-loading machinery — the template already has them. (`templates/` is read-only — fork out of it, never edit it in place. See "`templates/` Is Read-Only".)
+Like a Track 2 PWA, an agent is **cloned from a template, not written fresh.** The template lives at `templates/doc_scanner_backend/`. For any Building Agents task: copy `templates/doc_scanner_backend/` into `app_folder/scripts/{app_name}/`, then modify the modules and config to fit the user's prompt. Don't reinvent the orchestrator, the retry loop, or the prompt-loading machinery — the template already has them. (`templates/` is read-only — fork out of it, never edit it in place. See "`templates/` Is Read-Only".)
+
+### After cloning — rename `.env.example` and ask for the key
+
+The template ships with a placeholder `.env.example` next to `app.py`. After you copy the template into `app_folder/scripts/{app_name}/`, **rename `.env.example` to `.env`** in the new app folder — the loader in `prompt.py` reads `.env`, not `.env.example`, so the rename is what activates it.
+
+Then stop and ask the user for the API key:
+
+> *"I cloned the agent template into `app_folder/scripts/{app_name}/` and renamed `.env.example` to `.env`. Open that `.env` in the IDE and paste your OpenAI key after `OPENAI_API_KEY=`, then tell me to continue."*
+
+Never paste a key into the chat, into the file yourself, or onto a command line — the user puts it into `.env` themselves. `.env` is gitignored; `.env.example` is the empty template that ships with each clone, so the placeholder stays out of source control automatically.
 
 ## How to pick this track
 
@@ -1721,13 +1746,22 @@ Agent modules make no such promise. They are **roles, not slots**:
 
 So agent files are named by **what they do** (`prompt.py`, `retry.py`, `parse.py`, `export.py`). Numbering them would assert an ordering the structure doesn't implement. If a conceptual step order is worth recording, put it in the module docstrings — not the filenames.
 
-## Universal rules still apply
+## Self-contained file convention (Track 4 differs from Tracks 1–3)
 
-Building Agents does not opt out of the project-wide rules:
+**Agents are self-contained.** Inputs land in `document_input/` and outputs land in `agent_results/`, **both inside the agent's own folder** (`app_folder/scripts/{app_name}/document_input/` and `agent_results/`). Agents do **not** read from the project-level `input_folder/` and do **not** write to the project-level `output_folder/`.
 
-- **All outputs go under the task's own folder** — `output_folder/{app_name}/`. Never write to the root of `output_folder/`.
-- **`input_folder/` is sacred** — read source records from it, never modify them. Copy, don't move.
+This is a deliberate Track 4 carve-out from the project-wide "input is sacred / outputs go to `output_folder/{app_name}/`" rule:
+
+- An agent's inputs (the documents/images/records it processes) are workflow-specific — they aren't general project data the rest of the project should see.
+- An agent's outputs (the ledger CSV + per-record archive) are tightly coupled to the agent's own schema; keeping them next to the agent's code makes the whole folder portable.
+- The same convention applies to Track 3 apps whose backend wraps an agent (the `doc_scanner_fullstack` template). For Track 3 apps wrapping a Track 1 pipeline instead, the standard `input_folder/`/`output_folder/` rule applies.
+
+The cascaded `templates/doc_scanner_backend/` template ships with this layout. When you clone it, preserve it — do not "fix" the paths to point at the external folders.
+
+## Universal rules that still apply
+
 - **Every task folder gets `run_app.sh` + `run_app.bat`** — see "Launcher Scripts" below.
+- **Source images / documents the user owns are still sacred** — copy into `document_input/`, never modify the originals if they live elsewhere.
 
 ## Config files
 

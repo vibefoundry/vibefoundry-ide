@@ -698,7 +698,7 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
     structure is preserved. Raises on proxy errors so the caller can decide
     whether to fall back.
 
-    If subpath is given (e.g. "pwa_duckdb"), only that subtree is fetched,
+    If subpath is given (e.g. "dashboard_pwa_duckdb"), only that subtree is fetched,
     and files land at dest_root/<subpath>/... — the subpath name is preserved.
     """
     auth_headers = {"Authorization": f"Bearer {jwt}"}
@@ -750,19 +750,41 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
     return written
 
 
-async def _list_proxy_template_dirs(jwt: str) -> list[str]:
-    """List the top-level directory names under templates/ on the proxy.
+async def _list_proxy_template_entries(jwt: str) -> tuple[list[str], list[str]]:
+    """List the top-level entries under templates/ on the proxy.
 
-    Build cascades whatever folders this returns, so a new template ships by
-    just adding a folder at the source — no client update required. Top-level
-    files (e.g. AGENTS.md) are ignored here; AGENTS.md is fetched separately.
+    Returns (dirs, files). Both are cascaded so a new template (folder or a
+    top-level asset like catalog.json / icons) ships by just dropping it at the
+    source — no client update required. AGENTS.md is excluded from the file
+    list because it's fetched separately to the project root, not into
+    templates/.
     """
     auth_headers = {"Authorization": f"Bearer {jwt}"}
     timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         res = await client.get(PROXY_BASE_URL, headers=auth_headers)
         res.raise_for_status()
-        return [e["name"] for e in res.json() if e.get("type") == "dir"]
+        entries = res.json()
+    dirs = [e["name"] for e in entries if e.get("type") == "dir"]
+    files = [e["name"] for e in entries if e.get("type") == "file" and e["name"] != "AGENTS.md"]
+    return dirs, files
+
+
+async def _cascade_top_level_file(dest_dir: Path, jwt: str, name: str) -> bool:
+    """Fetch a single top-level templates/<name> file into dest_dir/<name>.
+    Returns True on success. Raises on failure so the caller can log per-file.
+    """
+    file_headers = {
+        "Authorization": f"Bearer {jwt}",
+        "Accept": "application/vnd.github.raw",
+    }
+    timeout = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        res = await client.get(f"{PROXY_BASE_URL}/{name}", headers=file_headers)
+        res.raise_for_status()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        (dest_dir / name).write_bytes(res.content)
+    return True
 
 
 @app.post("/api/build")
@@ -771,8 +793,9 @@ async def build_project():
     cascades every clonable template tree found at the source.
 
     The template list is discovered dynamically from the proxy (see
-    _list_proxy_template_dirs) rather than hardcoded — so adding a new template
-    is just dropping a folder at the source; no client update is required.
+    _list_proxy_template_entries) rather than hardcoded — so adding a new
+    template folder or a top-level asset (catalog.json, icons) ships by just
+    dropping it at the source; no client update is required.
     """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
@@ -819,11 +842,12 @@ async def build_project():
     # included. Authenticated-only — the public static path doesn't expose a
     # directory listing for recursive fetch.
     cascaded_files: dict[str, int] = {}
+    cascaded_top_level: list[str] = []
     if jwt:
         try:
-            template_dirs = await _list_proxy_template_dirs(jwt)
+            template_dirs, template_files = await _list_proxy_template_entries(jwt)
         except Exception as e:
-            template_dirs = []
+            template_dirs, template_files = [], []
             print(f"[Build] could not list templates from proxy: {e}")
         for tmpl in template_dirs:
             try:
@@ -837,6 +861,17 @@ async def build_project():
             except Exception as e:
                 cascaded_files[tmpl] = 0
                 print(f"[Build] {tmpl} cascade failed: {e}")
+        for fname in template_files:
+            try:
+                await _cascade_top_level_file(
+                    state.project_folder / "templates",
+                    jwt,
+                    fname,
+                )
+                cascaded_top_level.append(fname)
+                print(f"[Build] Cascaded top-level templates/{fname}")
+            except Exception as e:
+                print(f"[Build] top-level templates/{fname} cascade failed: {e}")
 
     # Initialize git repo if not already one
     git_initialized = False
@@ -898,7 +933,8 @@ async def build_project():
         "folders": {k: str(v) for k, v in folders.items()},
         "agents_md_copied": (state.project_folder / "AGENTS.md").exists(),
         "templates_cascaded": cascaded_files,
-        "pwa_duckdb_files_cascaded": cascaded_files.get("pwa_duckdb", 0),
+        "templates_top_level_cascaded": cascaded_top_level,
+        "dashboard_pwa_duckdb_files_cascaded": cascaded_files.get("dashboard_pwa_duckdb", 0),
         "git_initialized": git_initialized
     }
 
