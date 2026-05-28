@@ -1037,20 +1037,19 @@ const FileTree = ({
             const files = Array.from(e.target.files || []).filter(f => !SKIP.has(f.name))
             if (files.length === 0) return
 
+            // Strip a leading slash from the right-clicked folder so it stays
+            // project-relative — otherwise `state.project_folder / "/x"` on the
+            // backend resolves to "/x" and trips the access-denied check.
+            const baseFolder = (node.path || '').replace(/^\/+/, '')
             try {
               for (const file of files) {
                 const relPath = file.webkitRelativePath || file.name
                 setUploadStatus({ converting: false, filename: relPath })
 
-                const lastSlash = relPath.lastIndexOf('/')
-                const subdir = lastSlash >= 0 ? relPath.slice(0, lastSlash) : ''
-                const targetFolder = node.path
-                  ? (subdir ? `${node.path}/${subdir}` : node.path)
-                  : subdir
-
                 const formData = new FormData()
                 formData.append('file', file)
-                formData.append('folder', targetFolder)
+                formData.append('folder', baseFolder)
+                formData.append('relativePath', relPath)
 
                 const response = await fetch('/api/files/upload', {
                   method: 'POST',

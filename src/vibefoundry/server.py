@@ -1873,27 +1873,44 @@ SKIP_UPLOAD_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized"}
 @app.post("/api/files/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    folder: str = Form(...)
+    folder: str = Form(...),
+    relativePath: str = Form(default=""),
 ):
-    """Upload a binary file to a folder, streaming to disk in chunks."""
+    """Upload a binary file to a folder, streaming to disk in chunks.
+
+    `folder` is the project-relative destination directory (the folder the user
+    right-clicked on). `relativePath` is the file's path relative to that
+    directory — for a "Add Folder" upload it's the picker's webkitRelativePath
+    (e.g. "MyData/sub/file.txt"), so the directory structure is preserved
+    server-side. Older callers that don't send relativePath fall back to
+    file.filename and land the file directly inside `folder`.
+    """
     if not state.project_folder:
         raise HTTPException(status_code=400, detail="No project folder selected")
 
     if file.filename in SKIP_UPLOAD_NAMES:
         return {"success": True, "path": None, "skipped": True}
 
-    # Build target path
-    target_folder = state.project_folder / folder
-    target_path = target_folder / file.filename
+    base = folder.strip("/")
+    rel = (relativePath or file.filename or "").lstrip("/")
 
-    # Security check - ensure path is within project folder
+    if not rel:
+        raise HTTPException(status_code=400, detail="Missing file path")
+
+    # Reject any path traversal in either piece before joining.
+    for piece in (base, rel):
+        if ".." in Path(piece).parts:
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+    target_path = state.project_folder / base / rel if base else state.project_folder / rel
+
+    # Belt-and-suspenders: even after the explicit `..` check, confirm the
+    # resolved path is still inside the project folder.
     try:
         target_path.resolve().relative_to(state.project_folder.resolve())
     except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Create parent directories if needed (covers both target_folder and any
-    # subpath embedded in file.filename, just in case)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Stream file to disk in chunks to avoid loading entire file into memory
@@ -1904,7 +1921,7 @@ async def upload_file(
                 break
             f.write(chunk)
 
-    result_path = f"{folder}/{target_path.name}"
+    result_path = str(target_path.relative_to(state.project_folder))
     return {"success": True, "path": result_path, "converted": False}
 
 
