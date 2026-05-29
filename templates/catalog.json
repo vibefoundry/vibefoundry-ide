@@ -156,6 +156,119 @@
           ]
         }
       }
+    },
+    {
+      "id": "data_chatbot",
+      "name": "Data Chatbot — Polars Code-Gen",
+      "track": 3,
+      "icon": "data_analyst.png",
+      "description": "A conversational analytics app over parquet datasets. Flask backend exposes /api/ask as a Server-Sent Events stream; the React frontend renders the live stage progression (classify → codegen → execute → answer). The LLM never sees the rows — only a metadata profile (column names, dtypes, distinct values) generated from the parquets in data/. The codegen stage writes Polars code which the backend runs in an isolated subprocess; on traceback the error is fed back to the model and codegen retries up to max_retries. Each answered question lands in a timestamped folder with the code, result.parquet, and the verbal reply.",
+      "use_cases": [
+        "Natural-language analytics over a parquet warehouse — 'top 10 brands in Texas', 'avg volume by channel'",
+        "Internal data Q&A bot for non-SQL stakeholders",
+        "Ad-hoc reporting where the question keeps changing and a fixed dashboard is wrong",
+        "Schema-aware data discovery — the bot stays within the columns and values you actually have",
+        "Code-gen audit trail: every answered question ships its Polars code so the answer is verifiable"
+      ],
+      "architecture": {
+        "runtime": "Python 3.8+ (backend) and Node.js 16+ (frontend dev server). Modern browser.",
+        "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
+        "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports; clear_cache.sh / clear_cache.bat for a clean rebuild.",
+        "key_files": [
+          { "path": "backend/app.py", "role": "Flask orchestrator. Composes the per-question pipeline (classify → codegen+retry → execute → answer) and streams SSE events to the UI." },
+          { "path": "backend/prompt.py", "role": "Builds the system + user prompt for each stage and calls the OpenAI API. Reads instructions.json + output_schema.json." },
+          { "path": "backend/parse.py", "role": "Splits the codegen response into {code, response, error}." },
+          { "path": "backend/execute.py", "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet." },
+          { "path": "backend/retry.py", "role": "Codegen ↔ execute feedback loop; on traceback feeds the error back and regenerates up to max_retries." },
+          { "path": "backend/history.py", "role": "Per-conversation memory. Always attaches the last 3 turns; classify picks additional relevant prior turns to include." },
+          { "path": "backend/metadata.py", "role": "Profiles every parquet in data/ into the JSON column/value snapshot sent to the model." },
+          { "path": "backend/instructions.json", "role": "Per-stage prompt config — system text, rules, model id, max_retries." },
+          { "path": "backend/output_schema.json", "role": "JSON Schema the codegen reply must match." },
+          { "path": "frontend/src/App.jsx", "role": "React chat UI. Consumes the SSE stream and renders stage progression, generated code, and the answer with a result preview." }
+        ],
+        "data_flow": "Browser POST /api/ask → backend opens SSE → classify (metadata-only vs needs code) → codegen (Polars code) → execute (subprocess writes result.parquet) → retry on traceback → answer (LLM phrases the result) → per-question folder in output/ holds code + result + answer.md.",
+        "dependencies": {
+          "backend_python": ["flask", "flask-cors", "openai", "polars", "pyarrow"],
+          "frontend_node": ["react", "react-dom", "vite", "@vitejs/plugin-react"]
+        },
+        "customization": {
+          "edit_for_chatbot_behavior": [
+            "backend/instructions.json — system text, per-stage rules, model id, retry budget",
+            "backend/output_schema.json — what the codegen stage must return"
+          ],
+          "edit_for_ui": [
+            "frontend/src/App.jsx and sibling components"
+          ],
+          "drop_data": [
+            "data/*.parquet — drop your own parquets here; metadata.py profiles them on startup"
+          ],
+          "do_not_edit": [
+            "backend/execute.py subprocess isolation",
+            "the role-named module filenames in backend/",
+            "the SSE event protocol between backend and frontend"
+          ],
+          "env": {
+            "OPENAI_API_KEY": "Required. Lives in .env next to run_app.sh."
+          },
+          "notes": [
+            "The model never sees the data — only metadata.json. Row-level PII stays out of the prompt and the chatbot works over arbitrarily large parquets.",
+            "data/ ships empty (gitignored). Drop your own parquets in and restart the backend to profile them."
+          ]
+        }
+      }
+    },
+    {
+      "id": "data_chatbot_codex",
+      "name": "Data Chatbot — Codex CLI Variant",
+      "track": 3,
+      "icon": "data_analyst.png",
+      "description": "Same conversational analytics app as data_chatbot — Flask backend, React frontend, SSE stage stream, Polars subprocess execution — except the codegen stage invokes the Codex CLI as a local subprocess instead of calling the OpenAI API. Use this when you want code generation routed through a local CLI agent (different rate limits, different auth posture, on-prem audit trail), or as a reference for swapping any LLM call for a CLI invocation while keeping the rest of the stack identical.",
+      "use_cases": [
+        "Same analytics use cases as data_chatbot, with codegen routed through Codex CLI instead of the API",
+        "Environments where the LLM provider must be reached via a CLI agent rather than an HTTPS API",
+        "Avoiding API per-token cost on the largest stage by using a local CLI workflow for codegen",
+        "Reference for how to swap any single LLM call for a CLI invocation without touching the rest of the agent"
+      ],
+      "architecture": {
+        "runtime": "Python 3.8+ (backend) and Node.js 16+ (frontend dev server). Modern browser. Codex CLI installed and on PATH for the codegen stage.",
+        "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
+        "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports.",
+        "key_files": [
+          { "path": "backend/app.py", "role": "Flask orchestrator. Same pipeline as data_chatbot but routes the codegen stage through the Codex CLI." },
+          { "path": "backend/prompt.py", "role": "Builds prompts for classify/codegen/answer. Codegen call is a subprocess invocation of the Codex CLI; classify and answer still use the OpenAI SDK." },
+          { "path": "backend/execute.py", "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet." },
+          { "path": "backend/retry.py", "role": "Feeds execution errors back into the next Codex CLI call for codegen retries." },
+          { "path": "backend/instructions.json", "role": "Per-stage prompt config — system text, rules, model/CLI choice, retry budget." },
+          { "path": "backend/output_schema.json", "role": "JSON Schema the codegen reply must match." },
+          { "path": "frontend/src/App.jsx", "role": "Same chat UI as data_chatbot." }
+        ],
+        "data_flow": "Browser POST /api/ask → SSE stream → classify (OpenAI API) → codegen (Codex CLI subprocess) → execute (Polars subprocess) → retry on traceback → answer (OpenAI API).",
+        "dependencies": {
+          "backend_python": ["flask", "flask-cors", "polars", "pyarrow"],
+          "frontend_node": ["react", "react-dom", "vite", "@vitejs/plugin-react"],
+          "external_cli": ["Codex CLI (must be installed and on PATH)"]
+        },
+        "customization": {
+          "edit_for_chatbot_behavior": [
+            "backend/instructions.json — system text, per-stage rules, model/CLI args",
+            "backend/output_schema.json — codegen contract"
+          ],
+          "edit_for_ui": [
+            "frontend/src/App.jsx and sibling components"
+          ],
+          "drop_data": [
+            "data/*.parquet — drop your own parquets here"
+          ],
+          "env": {
+            "OPENAI_API_KEY": "Required for the classify and answer stages. Lives in .env next to run_app.sh.",
+            "CODEX_CLI": "Optional override for the CLI binary path; defaults to `codex` on PATH."
+          },
+          "notes": [
+            "Codex CLI must be installed on the machine running the backend. If you don't have it, use data_chatbot (pure API) instead.",
+            "Same data-privacy posture as data_chatbot: only metadata.json reaches the model, never the rows."
+          ]
+        }
+      }
     }
   ]
 }
