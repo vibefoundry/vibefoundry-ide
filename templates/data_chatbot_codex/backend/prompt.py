@@ -138,6 +138,8 @@ def _looks_like_auth_failure(text: str) -> bool:
 
 
 def _check_codex() -> None:
+    """Used by the /api/auth/codex/login endpoint and setup checks. For actual
+    subprocess invocations, _run_codex resolves the full path itself."""
     if not shutil.which(CODEX_BIN):
         raise CodexCallError(
             f"`{CODEX_BIN}` not found on PATH. Install OpenAI Codex CLI and "
@@ -186,7 +188,18 @@ def _run_codex(
       * non-zero exit code
       * empty / missing output file
     """
-    _check_codex()
+    # Resolve the full absolute path once here. Passing the bare name "codex"
+    # to subprocess.run forces a PATH lookup at spawn time inside the child
+    # process environment — on Windows that environment can differ from the
+    # shell that started Flask (e.g. PATH set by an installer after the
+    # terminal opened, or concurrently running with a trimmed env). Using the
+    # absolute path skips the lookup entirely.
+    codex_path = shutil.which(CODEX_BIN)
+    if not codex_path:
+        raise CodexCallError(
+            f"`{CODEX_BIN}` not found on PATH. Install OpenAI Codex CLI and "
+            f"run `{CODEX_BIN} login` before launching this chatbot."
+        )
 
     with tempfile.TemporaryDirectory(prefix="codex_call_") as tmp:
         sandbox = Path(tmp) / "sandbox"
@@ -194,7 +207,7 @@ def _run_codex(
         out_file = Path(tmp) / "out.txt"
 
         cmd = [
-            CODEX_BIN, "exec",
+            codex_path, "exec",
             "-C", str(sandbox),
             "-s", "read-only",
             "-o", str(out_file),
