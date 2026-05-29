@@ -1497,8 +1497,9 @@ if not exist "frontend\node_modules" (
 
 echo.
 echo [3/3] Checking concurrently...
-call npx concurrently --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
+REM Check the binary directly — `npx concurrently --version` can hang on Windows
+REM when npm contacts the registry, even with the package already installed.
+if not exist "frontend\node_modules\.bin\concurrently.cmd" (
     echo       Installing concurrently...
     cd frontend
     call npm install concurrently --save-dev
@@ -1605,7 +1606,9 @@ fi
 
 echo ""
 echo "[3/3] Checking concurrently..."
-if npx concurrently --version > /dev/null 2>&1; then
+# Check the binary directly — `npx concurrently --version` can hang on Windows
+# when npm contacts the registry, even with the package already installed.
+if [ -x "frontend/node_modules/.bin/concurrently" ]; then
     echo "      Already installed, skipping."
 else
     echo "      Installing concurrently..."
