@@ -14,8 +14,11 @@ echo  Launching Receipts App
 echo ========================================
 
 REM Reserve two free ports up front so frontend + backend agree on what's used.
-for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set BACKEND_PORT=%%p
-for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set FRONTEND_PORT=%%p
+REM Use a helper .py file instead of inline `python -c`. The inline form
+REM requires escaping single quotes inside `for /f`, which is unreliable
+REM across Windows shell variants (CMD vs. Terminal vs. PowerShell host).
+for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set BACKEND_PORT=%%p
+for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set FRONTEND_PORT=%%p
 
 echo Backend  : http://localhost:%BACKEND_PORT%
 echo Frontend : http://localhost:%FRONTEND_PORT%

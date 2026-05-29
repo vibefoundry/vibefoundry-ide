@@ -1534,14 +1534,34 @@ echo  Launching App
 echo ========================================
 
 REM Reserve two free ports up front so frontend + backend agree on what's used.
-REM Python binds to port 0, OS assigns a free port, prints it.
-for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set BACKEND_PORT=%%p
-for /f %%p in ('python -c "import socket; s=socket.socket(); s.bind((''''127.0.0.1'''',0)); print(s.getsockname()[1]); s.close()"') do set FRONTEND_PORT=%%p
+REM Use a helper .py file (backend/_pick_port.py, see below) instead of inline
+REM `python -c`. Inline -c forces escaping single quotes inside `for /f`, which
+REM breaks unpredictably across Windows shell variants (CMD vs. Terminal vs.
+REM PowerShell host). The helper file has no quoting at all.
+for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set BACKEND_PORT=%%p
+for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set FRONTEND_PORT=%%p
 
 echo Backend  : http://localhost:%BACKEND_PORT%
 echo Frontend : http://localhost:%FRONTEND_PORT%
 cd frontend
 call npx concurrently -n "backend,frontend" -c "blue,green" "cd /d \"%cd%\..\" && python backend\app.py" "npm run dev"
+```
+
+### Port-picker helper (backend/_pick_port.py)
+
+The Windows launcher above invokes this tiny helper instead of inlining the
+socket-bind code with `python -c`. The inline form requires escaping single
+quotes inside `for /f`, which fails unpredictably across Windows shell
+variants. A standalone file removes all CMD quoting.
+
+```python
+"""Print one free localhost port to stdout. Invoked by run_app.bat."""
+import socket
+
+s = socket.socket()
+s.bind(('127.0.0.1', 0))
+print(s.getsockname()[1])
+s.close()
 ```
 
 ### Windows Clear Cache (clear_cache.bat)
