@@ -25,9 +25,9 @@ echo [2/3] Checking Node dependencies...
 REM The vite binary is the sentinel - `npm run dev` invokes it. A half-installed
 REM node_modules\ (missing .bin\vite.cmd) needs `npm install` to re-run.
 if not exist "frontend\node_modules\.bin\vite.cmd" (
-    echo       Installing Node dependencies (clean install)...
+    echo       Installing Node dependencies - clean install...
     REM Nuke any residue from a prior interrupted install — leftover files
-    REM with broken perms (EACCES on esbuild's postinstall, etc.) make
+    REM with broken perms - EACCES on esbuild's postinstall, etc. - make
     REM `npm install` over the top fail. Starting clean guarantees a fresh,
     REM consistent tree.
     if exist "frontend\node_modules" rmdir /s /q "frontend\node_modules"
