@@ -1,46 +1,26 @@
-import { useState } from 'react'
-
-function TemplateCard({ template, isDownloading, downloadingId, onSelect }) {
-  const [showAllUses, setShowAllUses] = useState(false)
-  const uses = template.use_cases || []
-  const visibleUses = showAllUses ? uses : uses.slice(0, 3)
-  const remaining = uses.length - visibleUses.length
+function TemplateRow({ template, isDownloading, downloadingId, onSelect }) {
   const busy = isDownloading && downloadingId === template.id
   const disabled = isDownloading
 
   return (
     <div className="template-card">
-      <div className="template-card-header">
-        {template.icon && (
-          <img
-            className="template-card-icon"
-            src={`/api/templates/icon/${template.icon}`}
-            alt=""
-            onError={(e) => { e.currentTarget.style.display = 'none' }}
-          />
-        )}
-        <div className="template-card-titles">
+      {template.icon && (
+        <img
+          className="template-card-icon"
+          src={`/api/templates/icon/${template.icon}`}
+          alt=""
+          onError={(e) => { e.currentTarget.style.display = 'none' }}
+        />
+      )}
+      <div className="template-card-titles">
+        <div className="template-card-title-row">
           <h3>{template.name}</h3>
           {typeof template.track === 'number' && (
             <span className="template-card-track">Track {template.track}</span>
           )}
         </div>
+        <p className="template-card-desc">{template.description}</p>
       </div>
-      <p className="template-card-desc">{template.description}</p>
-      {uses.length > 0 && (
-        <ul className="template-card-uses">
-          {visibleUses.map((u, i) => <li key={i}>{u}</li>)}
-        </ul>
-      )}
-      {remaining > 0 && !showAllUses && (
-        <button
-          type="button"
-          className="template-card-more"
-          onClick={() => setShowAllUses(true)}
-        >
-          +{remaining} more
-        </button>
-      )}
       <div className="template-card-footer">
         <button
           className="btn-primary"
@@ -95,9 +75,9 @@ export default function TemplatePickerModal({
             <p className="modal-note">No templates available.</p>
           )}
           {templates.length > 0 && (
-            <div className="template-card-grid">
+            <div className="template-row-list">
               {templates.map((tpl) => (
-                <TemplateCard
+                <TemplateRow
                   key={tpl.id}
                   template={tpl}
                   isDownloading={isDownloading}
