@@ -227,6 +227,7 @@ def _run_codex(
                 input=prompt_text,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",  # explicit UTF-8 — Windows defaults to cp1252
                 timeout=timeout,
                 check=False,
             )
