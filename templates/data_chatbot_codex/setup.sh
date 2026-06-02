@@ -7,7 +7,7 @@ echo " Data Chatbot Setup"
 echo "========================================"
 
 echo ""
-echo "[1/4] Checking Codex CLI..."
+echo "[1/3] Checking Codex CLI..."
 # The chatbot drives every model call through `codex exec`. If codex isn't on
 # PATH there is nothing for the backend to talk to — fail fast here instead of
 # at the first /api/ask.
@@ -20,7 +20,7 @@ else
 fi
 
 echo ""
-echo "[2/4] Checking Python dependencies..."
+echo "[2/3] Checking Python dependencies..."
 if pip show flask > /dev/null 2>&1 && pip show polars > /dev/null 2>&1; then
     echo "      Already installed, skipping."
 else
@@ -29,10 +29,12 @@ else
 fi
 
 echo ""
-echo "[3/4] Checking Node dependencies..."
-# The vite binary is the sentinel — `npm run dev` invokes it. A half-installed
-# node_modules/ (missing .bin/vite) needs `npm install` to re-run.
-if [ -x "frontend/node_modules/.bin/vite" ]; then
+echo "[3/3] Checking Node dependencies..."
+# The vite binary is the sentinel — the launcher invokes it. A half-installed
+# node_modules/ (missing .bin/vite) needs `npm install` to re-run. concurrently
+# is a declared devDependency, so this single install brings it in too — no
+# separate `npx`/`npm install concurrently` step needed.
+if [ -x "frontend/node_modules/.bin/vite" ] && [ -x "frontend/node_modules/.bin/concurrently" ]; then
     echo "      Already installed, skipping."
 else
     echo "      Installing Node dependencies (clean install)..."
@@ -42,19 +44,6 @@ else
     rm -rf frontend/node_modules
     cd frontend
     npm install || { echo "ERROR: npm install failed"; exit 1; }
-    cd ..
-fi
-
-echo ""
-echo "[4/4] Checking concurrently..."
-# Check the binary directly — `npx concurrently --version` can hang on Windows
-# when npm contacts the registry, even with the package already installed.
-if [ -x "frontend/node_modules/.bin/concurrently" ]; then
-    echo "      Already installed, skipping."
-else
-    echo "      Installing concurrently..."
-    cd frontend
-    npm install concurrently --save-dev || { echo "ERROR: concurrently install failed"; exit 1; }
     cd ..
 fi
 

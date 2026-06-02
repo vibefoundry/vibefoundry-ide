@@ -7,7 +7,7 @@ echo  Data Chatbot Setup
 echo ========================================
 
 echo.
-echo [1/4] Checking Codex CLI...
+echo [1/3] Checking Codex CLI...
 REM The chatbot drives every model call through `codex exec`. If codex isn't on
 REM PATH there is nothing for the backend to talk to — fail fast here instead
 REM of at the first /api/ask.
@@ -21,7 +21,7 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [2/4] Checking Python dependencies...
+echo [2/3] Checking Python dependencies...
 pip show flask >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo       Installing Python dependencies...
@@ -35,9 +35,11 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [3/4] Checking Node dependencies...
-REM The vite binary is the sentinel — `npm run dev` invokes it. A half-installed
+echo [3/3] Checking Node dependencies...
+REM The vite binary is the sentinel — the launcher invokes it. A half-installed
 REM node_modules\ (missing .bin\vite.cmd) needs `npm install` to re-run.
+REM concurrently is a declared devDependency, so this single install brings it
+REM in too — no separate `npx`/`npm install concurrently` step needed.
 if not exist "frontend\node_modules\.bin\vite.cmd" (
     echo       Installing Node dependencies - clean install...
     REM Nuke any residue from a prior interrupted install — leftover files
@@ -49,24 +51,6 @@ if not exist "frontend\node_modules\.bin\vite.cmd" (
     call npm install
     if %ERRORLEVEL% NEQ 0 (
         echo ERROR: npm install failed
-        cd ..
-        exit /b 1
-    )
-    cd ..
-) else (
-    echo       Already installed, skipping.
-)
-
-echo.
-echo [4/4] Checking concurrently...
-REM Check the binary directly — `npx concurrently --version` can hang on Windows
-REM when npm contacts the registry, even with the package already installed.
-if not exist "frontend\node_modules\.bin\concurrently.cmd" (
-    echo       Installing concurrently...
-    cd frontend
-    call npm install concurrently --save-dev
-    if %ERRORLEVEL% NEQ 0 (
-        echo ERROR: concurrently install failed
         cd ..
         exit /b 1
     )

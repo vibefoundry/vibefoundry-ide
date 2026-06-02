@@ -5,7 +5,7 @@ cd /d "%~dp0"
 echo [run_app] Starting launcher...
 echo [run_app] Working directory: %CD%
 
-REM The vite binary is the install sentinel — `npm run dev` calls it directly,
+REM The vite binary is the install sentinel — the launcher calls it directly,
 REM so its absence (missing OR half-installed node_modules\) means setup must run.
 echo [run_app] Checking frontend deps...
 if not exist "frontend\node_modules\.bin\vite.cmd" (
@@ -35,13 +35,16 @@ REM hangs indefinitely contacting the auth server. Auth errors surface in the
 REM app UI via the re-auth modal instead.
 
 echo [run_app] Reserving ports...
-for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set BACKEND_PORT=%%p
+REM One python call returns both ports (see backend\_pick_port.py).
+for /f "tokens=1,2" %%a in ('python "%~dp0backend\_pick_port.py"') do (
+    set BACKEND_PORT=%%a
+    set FRONTEND_PORT=%%b
+)
 if "%BACKEND_PORT%"=="" (
     echo [run_app] ERROR: could not reserve backend port. Is Python installed and on PATH?
     pause
     exit /b 1
 )
-for /f %%p in ('python "%~dp0backend\_pick_port.py"') do set FRONTEND_PORT=%%p
 if "%FRONTEND_PORT%"=="" (
     echo [run_app] ERROR: could not reserve frontend port.
     pause
@@ -57,4 +60,7 @@ echo Frontend : http://localhost:%FRONTEND_PORT%
 
 echo [run_app] Starting servers with concurrently...
 cd frontend
-call npx concurrently -n "backend,frontend" -c "blue,green" "cd /d \"%cd%\..\" && python backend\app.py" "npm run dev"
+REM Call the local concurrently + vite binaries directly. `npx` does a registry
+REM round-trip that can hang on Windows even when the package is installed, and
+REM invoking vite directly skips an extra `npm run dev` Node bootstrap.
+call node_modules\.bin\concurrently.cmd -n "backend,frontend" -c "blue,green" "cd /d \"%cd%\..\" && python backend\app.py" "node_modules\.bin\vite.cmd"
