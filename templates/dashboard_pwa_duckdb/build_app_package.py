@@ -1,16 +1,20 @@
 """
-Builds the dashboard_pwa_duckdb PWA into a Track 2 distributable package at
-output_folder/{app_name}/. Vite-less: just stages parquets, copies static
-src_app/ files, and writes the launcher trio (pc_start.bat, mac_start.command,
-mac_start.sh) plus serve.ps1 inside application_files/.
+Builds the dashboard_pwa_duckdb PWA into a Track 2 distributable package inside
+app_folder/, saved as dashboard_v{N} where N is the next unused version number
+(so each build keeps the prior ones rather than overwriting). Vite-less: just
+stages parquets, copies static src_app/ files, and writes the launcher trio
+(pc_start.bat, mac_start.command, mac_start.sh) plus serve.ps1 inside
+application_files/.
 """
 import os
+import re
 import shutil
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR)))
-OUTPUT_FOLDER = os.path.join(PROJECT_DIR, "output_folder")
+# SCRIPT_DIR is <project>/app_folder/scripts/dashboard_pwa_duckdb; up two levels
+# lands on <project>/app_folder, where the built packages are saved.
+APP_FOLDER_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
 APP_CORE_DIR = os.path.join(SCRIPT_DIR, "app_core")
 APP_SOURCE_DIR = os.path.join(APP_CORE_DIR, "src_app")
 
@@ -18,7 +22,23 @@ sys.path.insert(0, APP_CORE_DIR)
 from prepare_dev_assets import prepare_dev_assets
 
 APP_NAME = os.path.basename(SCRIPT_DIR)
-PACKAGE_DIR = os.path.join(OUTPUT_FOLDER, APP_NAME)
+PACKAGE_BASENAME = "dashboard"
+
+
+def next_version_dir(parent, basename):
+    """Return parent/<basename>_v<N>, where N is one past the highest existing
+    <basename>_v<N> folder — so each build is saved as a fresh version and never
+    clobbers an earlier one."""
+    highest = 0
+    if os.path.isdir(parent):
+        for name in os.listdir(parent):
+            match = re.fullmatch(rf"{re.escape(basename)}_v(\d+)", name)
+            if match and os.path.isdir(os.path.join(parent, name)):
+                highest = max(highest, int(match.group(1)))
+    return os.path.join(parent, f"{basename}_v{highest + 1}")
+
+
+PACKAGE_DIR = next_version_dir(APP_FOLDER_DIR, PACKAGE_BASENAME)
 APP_FILES = os.path.join(PACKAGE_DIR, "application_files")
 
 
