@@ -1,10 +1,10 @@
 """
 Builds the dashboard_pwa_duckdb PWA into a Track 2 distributable package inside
-app_folder/, saved as dashboard_v{N} where N is the next unused version number
-(so each build keeps the prior ones rather than overwriting). Vite-less: just
-stages parquets, copies static src_app/ files, and writes the launcher trio
-(pc_start.bat, mac_start.command, mac_start.sh) plus serve.ps1 inside
-application_files/.
+a published_apps/ folder next to this script, saved as dashboard_v{N} where N is
+the next unused version number (so each build keeps the prior ones rather than
+overwriting). Vite-less: just stages parquets, copies static src_app/ files, and
+writes the launcher trio (pc_start.bat, mac_start.command, mac_start.sh) plus
+serve.ps1 inside application_files/.
 """
 import os
 import re
@@ -12,9 +12,9 @@ import shutil
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# SCRIPT_DIR is <project>/app_folder/scripts/dashboard_pwa_duckdb; up two levels
-# lands on <project>/app_folder, where the built packages are saved.
-APP_FOLDER_DIR = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+# Built packages are saved under published_apps/ in the same folder as this
+# script (created on first build). Each build lands in its own dashboard_v{N}.
+PUBLISHED_DIR = os.path.join(SCRIPT_DIR, "published_apps")
 APP_CORE_DIR = os.path.join(SCRIPT_DIR, "app_core")
 APP_SOURCE_DIR = os.path.join(APP_CORE_DIR, "src_app")
 
@@ -38,7 +38,7 @@ def next_version_dir(parent, basename):
     return os.path.join(parent, f"{basename}_v{highest + 1}")
 
 
-PACKAGE_DIR = next_version_dir(APP_FOLDER_DIR, PACKAGE_BASENAME)
+PACKAGE_DIR = next_version_dir(PUBLISHED_DIR, PACKAGE_BASENAME)
 APP_FILES = os.path.join(PACKAGE_DIR, "application_files")
 
 
