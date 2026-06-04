@@ -2,9 +2,11 @@
 # Run: bash app_folder/scripts/data_chatbot_codex/run_app.sh
 cd "$(dirname "$0")"
 
-# Use the vite binary as the install sentinel — the launcher calls it directly,
-# so its absence (missing OR half-installed node_modules/) means setup must run.
-if [ ! -x "frontend/node_modules/.bin/vite" ]; then
+# Use the vite AND concurrently binaries as install sentinels — the launcher
+# calls both directly (see exec below), so either one's absence (missing OR
+# half-installed node_modules/, e.g. a tree from before concurrently was added
+# to package.json) means setup must run.
+if [ ! -x "frontend/node_modules/.bin/vite" ] || [ ! -x "frontend/node_modules/.bin/concurrently" ]; then
     echo "Frontend deps missing or incomplete — running setup.sh..."
     bash "$(dirname "$0")/setup.sh" || { echo "Setup failed."; exit 1; }
 fi

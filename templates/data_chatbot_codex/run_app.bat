@@ -5,10 +5,15 @@ cd /d "%~dp0"
 echo [run_app] Starting launcher...
 echo [run_app] Working directory: %CD%
 
-REM The vite binary is the install sentinel — the launcher calls it directly,
-REM so its absence (missing OR half-installed node_modules\) means setup must run.
+REM The vite AND concurrently binaries are the install sentinels — the launcher
+REM calls both directly (see concurrently call below), so either one's absence
+REM (missing OR half-installed node_modules\, e.g. a tree from before
+REM concurrently was added to package.json) means setup must run.
 echo [run_app] Checking frontend deps...
-if not exist "frontend\node_modules\.bin\vite.cmd" (
+set NEED_SETUP=
+if not exist "frontend\node_modules\.bin\vite.cmd" set NEED_SETUP=1
+if not exist "frontend\node_modules\.bin\concurrently.cmd" set NEED_SETUP=1
+if defined NEED_SETUP (
     echo [run_app] Frontend deps missing - running setup.bat...
     call "%~dp0setup.bat"
     if %ERRORLEVEL% NEQ 0 (
