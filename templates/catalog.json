@@ -20,24 +20,55 @@
         "entry_point": "app.py",
         "launcher": "run_app.sh / run_app.bat (cd into the folder, python app.py)",
         "key_files": [
-          { "path": "app.py", "role": "Orchestrator. Watches document_input/, dispatches files to a worker thread pool, coordinates logging." },
-          { "path": "prompt.py", "role": "Builds the system + user prompt from instructions.json and output_schema.json, base64-encodes images, calls the LLM." },
-          { "path": "retry.py", "role": "Wraps the LLM call. Re-asks on missing fields or network errors; exponential backoff on 429s." },
-          { "path": "parse.py", "role": "Appends the validated record to classifications.csv. Thread-safe under concurrent writes." },
-          { "path": "export.py", "role": "Copies the original input and the JSON record into agent_results/scanned/{record_id}/ for audit." },
-          { "path": "instructions.json", "role": "Prompt configuration: system text, per-field rules, model choice, max_retries." },
-          { "path": "output_schema.json", "role": "JSON Schema (strict) that the LLM output must match. Drives both validation and prompt generation." }
+          {
+            "path": "app.py",
+            "role": "Orchestrator. Watches document_input/, dispatches files to a worker thread pool, coordinates logging."
+          },
+          {
+            "path": "prompt.py",
+            "role": "Builds the system + user prompt from instructions.json and output_schema.json, base64-encodes images, calls the LLM."
+          },
+          {
+            "path": "retry.py",
+            "role": "Wraps the LLM call. Re-asks on missing fields or network errors; exponential backoff on 429s."
+          },
+          {
+            "path": "parse.py",
+            "role": "Appends the validated record to classifications.csv. Thread-safe under concurrent writes."
+          },
+          {
+            "path": "export.py",
+            "role": "Copies the original input and the JSON record into agent_results/scanned/{record_id}/ for audit."
+          },
+          {
+            "path": "instructions.json",
+            "role": "Prompt configuration: system text, per-field rules, model choice, max_retries."
+          },
+          {
+            "path": "output_schema.json",
+            "role": "JSON Schema (strict) that the LLM output must match. Drives both validation and prompt generation."
+          }
         ],
         "data_flow": "document_input/{file} → prompt.py builds request → LLM call (with retry.py) → parse.py appends row to agent_results/classifications.csv → export.py archives a copy under agent_results/scanned/{record_id}/",
         "dependencies": {
-          "python": ["openai", "watchdog", "pillow"]
+          "python": [
+            "openai",
+            "watchdog",
+            "pillow"
+          ]
         },
         "customization": {
           "edit": [
             "instructions.json — change the system prompt, per-field rules, model, max_retries",
             "output_schema.json — change the fields the LLM must return (and any enums that drive the prompt)"
           ],
-          "do_not_edit": ["app.py", "prompt.py", "retry.py", "parse.py", "export.py"],
+          "do_not_edit": [
+            "app.py",
+            "prompt.py",
+            "retry.py",
+            "parse.py",
+            "export.py"
+          ],
           "env": {
             "OPENAI_API_KEY": "Required. Lives in .env next to run_app.sh.",
             "IMAGE_SCANNER_WORKERS": "Optional. Worker thread count (default tuned for typical desktops)."
@@ -64,19 +95,49 @@
         "entry_point": "run_app.sh (dev) → prepare_dev_assets.py + serve.py. build_app_package.py produces the distributable.",
         "launcher": "run_app.sh / run_app.bat for dev; output_folder/{app}/mac_start.command, mac_start.sh, pc_start.bat for end users.",
         "key_files": [
-          { "path": "build_app_package.py", "role": "Build script. Stages parquets from input_folder/, copies src_app/ to output_folder/, writes the end-user launcher trio." },
-          { "path": "app_core/prepare_dev_assets.py", "role": "Dev helper. Syncs the parquets listed in app_config.json from input_folder/ into src_app/data/. Idempotent." },
-          { "path": "app_core/serve.py", "role": "Local HTTP server for development. Picks a free port, registers .wasm and .parquet MIME types, opens the browser." },
-          { "path": "app_core/src_app/index.html", "role": "Static shell. Loads React UMD, the DuckDB bundle, and js/app.js." },
-          { "path": "app_core/src_app/js/app.js", "role": "React app (no JSX). Boots DuckDB-WASM, loads parquets, renders the dataset picker, filters, and table." },
-          { "path": "app_core/src_app/data/app_config.json", "role": "App configuration: title and dataset list. Each dataset declares its file and the filter type per column (select / text / range / boolean)." },
-          { "path": "app_core/src_app/lib/", "role": "Pre-bundled React 18, ReactDOM 18, and DuckDB-WASM (bundle + .wasm + worker). Committed so users don't need npm." },
-          { "path": "CUSTOMIZE.md", "role": "Recipe. Tells the student which files to edit when forking and which to leave alone. Delete it after cloning." }
+          {
+            "path": "build_app_package.py",
+            "role": "Build script. Stages parquets from input_folder/, copies src_app/ to output_folder/, writes the end-user launcher trio."
+          },
+          {
+            "path": "app_core/prepare_dev_assets.py",
+            "role": "Dev helper. Syncs the parquets listed in app_config.json from input_folder/ into src_app/data/. Idempotent."
+          },
+          {
+            "path": "app_core/serve.py",
+            "role": "Local HTTP server for development. Picks a free port, registers .wasm and .parquet MIME types, opens the browser."
+          },
+          {
+            "path": "app_core/src_app/index.html",
+            "role": "Static shell. Loads React UMD, the DuckDB bundle, and js/app.js."
+          },
+          {
+            "path": "app_core/src_app/js/app.js",
+            "role": "React app (no JSX). Boots DuckDB-WASM, loads parquets, renders the dataset picker, filters, and table."
+          },
+          {
+            "path": "app_core/src_app/data/app_config.json",
+            "role": "App configuration: title and dataset list. Each dataset declares its file and the filter type per column (select / text / range / boolean)."
+          },
+          {
+            "path": "app_core/src_app/lib/",
+            "role": "Pre-bundled React 18, ReactDOM 18, and DuckDB-WASM (bundle + .wasm + worker). Committed so users don't need npm."
+          },
+          {
+            "path": "CUSTOMIZE.md",
+            "role": "Recipe. Tells the student which files to edit when forking and which to leave alone. Delete it after cloning."
+          }
         ],
         "data_flow": "input_folder/*.parquet → prepare_dev_assets stages into src_app/data/ → browser fetches at runtime → DuckDB-WASM registers as a virtual file → SQL queries with filters + LIMIT/OFFSET → React table render",
         "dependencies": {
-          "python_build_time_only": ["polars"],
-          "browser_runtime": ["React 18 (UMD)", "ReactDOM 18 (UMD)", "DuckDB-WASM"]
+          "python_build_time_only": [
+            "polars"
+          ],
+          "browser_runtime": [
+            "React 18 (UMD)",
+            "ReactDOM 18 (UMD)",
+            "DuckDB-WASM"
+          ]
         },
         "customization": {
           "edit": [
@@ -91,7 +152,11 @@
             "app_core/prepare_dev_assets.py",
             "app_core/serve.py"
           ],
-          "delete_after_cloning": ["CUSTOMIZE.md", "sample_data/", "any sample parquets shipped in src_app/data/"]
+          "delete_after_cloning": [
+            "CUSTOMIZE.md",
+            "sample_data/",
+            "any sample parquets shipped in src_app/data/"
+          ]
         }
       }
     },
@@ -114,23 +179,69 @@
         "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
         "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports; clear_cache.sh / clear_cache.bat for a clean rebuild.",
         "key_files": [
-          { "path": "setup.sh", "role": "Idempotent first-run install. pip installs backend deps, npm installs frontend deps." },
-          { "path": "run_app.sh", "role": "Reserves two free ports (BACKEND_PORT, FRONTEND_PORT), launches Flask + Vite concurrently." },
-          { "path": "clear_cache.sh", "role": "Removes node_modules, __pycache__, and build artifacts, then re-runs setup." },
-          { "path": "backend/app.py", "role": "Flask app. Endpoints: POST /api/scan (multipart upload → SSE stream), GET /api/receipts, GET /api/line_items, GET /api/receipts/<id>/items, GET /api/image/<id>." },
-          { "path": "backend/prompt.py / parse.py / retry.py / export.py", "role": "Verbatim role-named modules from the doc_scanner_backend template. Same retry, schema validation, and archive logic, now driven by HTTP requests instead of a folder watcher." },
-          { "path": "backend/instructions.json", "role": "Prompt configuration for the wrapped agent." },
-          { "path": "backend/output_schema.json", "role": "JSON Schema the LLM output must match." },
-          { "path": "backend/requirements.txt", "role": "Backend Python deps." },
-          { "path": "frontend/src/App.jsx", "role": "React UI. Upload form, SSE stream consumer, receipt + line-item tables, detail drawer with image preview." },
-          { "path": "frontend/vite.config.js", "role": "Reads FRONTEND_PORT and BACKEND_PORT env vars; proxies /api to the backend." },
-          { "path": "frontend/package.json", "role": "Frontend deps: react, react-dom, vite, @vitejs/plugin-react." }
+          {
+            "path": "setup.sh",
+            "role": "Idempotent first-run install. pip installs backend deps, npm installs frontend deps."
+          },
+          {
+            "path": "run_app.sh",
+            "role": "Reserves two free ports (BACKEND_PORT, FRONTEND_PORT), launches Flask + Vite concurrently."
+          },
+          {
+            "path": "clear_cache.sh",
+            "role": "Removes node_modules, __pycache__, and build artifacts, then re-runs setup."
+          },
+          {
+            "path": "backend/app.py",
+            "role": "Flask app. Endpoints: POST /api/scan (multipart upload → SSE stream), GET /api/receipts, GET /api/line_items, GET /api/receipts/<id>/items, GET /api/image/<id>."
+          },
+          {
+            "path": "backend/prompt.py / parse.py / retry.py / export.py",
+            "role": "Verbatim role-named modules from the doc_scanner_backend template. Same retry, schema validation, and archive logic, now driven by HTTP requests instead of a folder watcher."
+          },
+          {
+            "path": "backend/instructions.json",
+            "role": "Prompt configuration for the wrapped agent."
+          },
+          {
+            "path": "backend/output_schema.json",
+            "role": "JSON Schema the LLM output must match."
+          },
+          {
+            "path": "backend/requirements.txt",
+            "role": "Backend Python deps."
+          },
+          {
+            "path": "frontend/src/App.jsx",
+            "role": "React UI. Upload form, SSE stream consumer, receipt + line-item tables, detail drawer with image preview."
+          },
+          {
+            "path": "frontend/vite.config.js",
+            "role": "Reads FRONTEND_PORT and BACKEND_PORT env vars; proxies /api to the backend."
+          },
+          {
+            "path": "frontend/package.json",
+            "role": "Frontend deps: react, react-dom, vite, @vitejs/plugin-react."
+          }
         ],
         "data_flow": "Browser upload → POST /api/scan (multipart) → Flask saves to backend/document_input/ → worker thread pool runs the per-file agent (prompt → LLM → retry → parse) → results appended to backend/agent_results/classifications.csv and archived under backend/agent_results/scanned/{id}/ → SSE event per completed record → frontend tables update live.",
         "dependencies": {
-          "backend_python": ["flask", "flask-cors", "openai", "polars", "pillow"],
-          "frontend_node": ["react", "react-dom", "vite", "@vitejs/plugin-react"],
-          "dev_tooling": ["concurrently"]
+          "backend_python": [
+            "flask",
+            "flask-cors",
+            "openai",
+            "polars",
+            "pillow"
+          ],
+          "frontend_node": [
+            "react",
+            "react-dom",
+            "vite",
+            "@vitejs/plugin-react"
+          ],
+          "dev_tooling": [
+            "concurrently"
+          ]
         },
         "customization": {
           "edit_for_agent_behavior": [
@@ -175,21 +286,62 @@
         "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
         "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports; clear_cache.sh / clear_cache.bat for a clean rebuild.",
         "key_files": [
-          { "path": "backend/app.py", "role": "Flask orchestrator. Composes the per-question pipeline (classify → codegen+retry → execute → answer) and streams SSE events to the UI." },
-          { "path": "backend/prompt.py", "role": "Builds the system + user prompt for each stage and calls the OpenAI API. Reads instructions.json + output_schema.json." },
-          { "path": "backend/parse.py", "role": "Splits the codegen response into {code, response, error}." },
-          { "path": "backend/execute.py", "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet." },
-          { "path": "backend/retry.py", "role": "Codegen ↔ execute feedback loop; on traceback feeds the error back and regenerates up to max_retries." },
-          { "path": "backend/history.py", "role": "Per-conversation memory. Always attaches the last 3 turns; classify picks additional relevant prior turns to include." },
-          { "path": "backend/metadata.py", "role": "Profiles every parquet in data/ into the JSON column/value snapshot sent to the model." },
-          { "path": "backend/instructions.json", "role": "Per-stage prompt config — system text, rules, model id, max_retries." },
-          { "path": "backend/output_schema.json", "role": "JSON Schema the codegen reply must match." },
-          { "path": "frontend/src/App.jsx", "role": "React chat UI. Consumes the SSE stream and renders stage progression, generated code, and the answer with a result preview." }
+          {
+            "path": "backend/app.py",
+            "role": "Flask orchestrator. Composes the per-question pipeline (classify → codegen+retry → execute → answer) and streams SSE events to the UI."
+          },
+          {
+            "path": "backend/prompt.py",
+            "role": "Builds the system + user prompt for each stage and calls the OpenAI API. Reads instructions.json + output_schema.json."
+          },
+          {
+            "path": "backend/parse.py",
+            "role": "Splits the codegen response into {code, response, error}."
+          },
+          {
+            "path": "backend/execute.py",
+            "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet."
+          },
+          {
+            "path": "backend/retry.py",
+            "role": "Codegen ↔ execute feedback loop; on traceback feeds the error back and regenerates up to max_retries."
+          },
+          {
+            "path": "backend/history.py",
+            "role": "Per-conversation memory. Always attaches the last 3 turns; classify picks additional relevant prior turns to include."
+          },
+          {
+            "path": "backend/metadata.py",
+            "role": "Profiles every parquet in data/ into the JSON column/value snapshot sent to the model."
+          },
+          {
+            "path": "backend/instructions.json",
+            "role": "Per-stage prompt config — system text, rules, model id, max_retries."
+          },
+          {
+            "path": "backend/output_schema.json",
+            "role": "JSON Schema the codegen reply must match."
+          },
+          {
+            "path": "frontend/src/App.jsx",
+            "role": "React chat UI. Consumes the SSE stream and renders stage progression, generated code, and the answer with a result preview."
+          }
         ],
         "data_flow": "Browser POST /api/ask → backend opens SSE → classify (metadata-only vs needs code) → codegen (Polars code) → execute (subprocess writes result.parquet) → retry on traceback → answer (LLM phrases the result) → per-question folder in output/ holds code + result + answer.md.",
         "dependencies": {
-          "backend_python": ["flask", "flask-cors", "openai", "polars", "pyarrow"],
-          "frontend_node": ["react", "react-dom", "vite", "@vitejs/plugin-react"]
+          "backend_python": [
+            "flask",
+            "flask-cors",
+            "openai",
+            "polars",
+            "pyarrow"
+          ],
+          "frontend_node": [
+            "react",
+            "react-dom",
+            "vite",
+            "@vitejs/plugin-react"
+          ]
         },
         "customization": {
           "edit_for_chatbot_behavior": [
@@ -234,19 +386,52 @@
         "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
         "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports.",
         "key_files": [
-          { "path": "backend/app.py", "role": "Flask orchestrator. Same pipeline as data_chatbot but routes the codegen stage through the Codex CLI." },
-          { "path": "backend/prompt.py", "role": "Builds prompts for classify/codegen/answer. Codegen call is a subprocess invocation of the Codex CLI; classify and answer still use the OpenAI SDK." },
-          { "path": "backend/execute.py", "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet." },
-          { "path": "backend/retry.py", "role": "Feeds execution errors back into the next Codex CLI call for codegen retries." },
-          { "path": "backend/instructions.json", "role": "Per-stage prompt config — system text, rules, model/CLI choice, retry budget." },
-          { "path": "backend/output_schema.json", "role": "JSON Schema the codegen reply must match." },
-          { "path": "frontend/src/App.jsx", "role": "Same chat UI as data_chatbot." }
+          {
+            "path": "backend/app.py",
+            "role": "Flask orchestrator. Same pipeline as data_chatbot but routes the codegen stage through the Codex CLI."
+          },
+          {
+            "path": "backend/prompt.py",
+            "role": "Builds prompts for classify/codegen/answer. Codegen call is a subprocess invocation of the Codex CLI; classify and answer still use the OpenAI SDK."
+          },
+          {
+            "path": "backend/execute.py",
+            "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet."
+          },
+          {
+            "path": "backend/retry.py",
+            "role": "Feeds execution errors back into the next Codex CLI call for codegen retries."
+          },
+          {
+            "path": "backend/instructions.json",
+            "role": "Per-stage prompt config — system text, rules, model/CLI choice, retry budget."
+          },
+          {
+            "path": "backend/output_schema.json",
+            "role": "JSON Schema the codegen reply must match."
+          },
+          {
+            "path": "frontend/src/App.jsx",
+            "role": "Same chat UI as data_chatbot."
+          }
         ],
         "data_flow": "Browser POST /api/ask → SSE stream → classify (OpenAI API) → codegen (Codex CLI subprocess) → execute (Polars subprocess) → retry on traceback → answer (OpenAI API).",
         "dependencies": {
-          "backend_python": ["flask", "flask-cors", "polars", "pyarrow"],
-          "frontend_node": ["react", "react-dom", "vite", "@vitejs/plugin-react"],
-          "external_cli": ["Codex CLI (must be installed and on PATH)"]
+          "backend_python": [
+            "flask",
+            "flask-cors",
+            "polars",
+            "pyarrow"
+          ],
+          "frontend_node": [
+            "react",
+            "react-dom",
+            "vite",
+            "@vitejs/plugin-react"
+          ],
+          "external_cli": [
+            "Codex CLI (must be installed and on PATH)"
+          ]
         },
         "customization": {
           "edit_for_chatbot_behavior": [
@@ -266,6 +451,62 @@
           "notes": [
             "Codex CLI must be installed on the machine running the backend. If you don't have it, use data_chatbot (pure API) instead.",
             "Same data-privacy posture as data_chatbot: only metadata.json reaches the model, never the rows."
+          ]
+        }
+      }
+    },
+    {
+      "id": "publish",
+      "name": "Publish — Desktop App Packager",
+      "track": 0,
+      "icon": "data_analyst.png",
+      "description": "A drop-in Publish/ folder (publish.py + logo + an LLM README) that packages any VibeFoundry app — Flask backend + Vite frontend — into a self-contained, one-click desktop installer for macOS and Windows. Drop it into your app root, then ask the assistant to tailor it. Most apps need no edits: it reads requirements.txt, builds the frontend, vendors its own runtime, and emits the installers + launchers.",
+      "use_cases": [
+        "Turn a finished chatbot / dashboard / agent app into a double-click desktop app for non-technical users",
+        "Ship an internal tool that installs its own Python + Node runtime — nothing for the user to install",
+        "Hand a teammate a branded installer instead of source code + setup instructions",
+        "Reuse one packaging pipeline across many apps by dropping the same folder in",
+        "Let an LLM customize packaging (Python version, platforms, external CLIs) against a documented contract"
+      ],
+      "architecture": {
+        "runtime": "Build-time: Python 3 + Node on the developer machine. End user: a self-contained Miniforge env installed into the app folder — no prior toolchain required.",
+        "entry_point": "Publish/publish.py — run `python Publish/publish.py \"App Name\"` from the app root.",
+        "launcher": "Emits install.command / install.bat (one-click installers) and run_app.command / run_app.bat (launchers) into Publish/published_apps/<slug>_v{N}/.",
+        "key_files": [
+          {
+            "path": "Publish/publish.py",
+            "role": "The packager: builds the frontend, vendors dependency wheels for both OSes, assembles application_core/, generates icons, and emits the installers + launchers."
+          },
+          {
+            "path": "Publish/vf_logo.png",
+            "role": "Branding — app icon, splash, favicon. Replace to rebrand."
+          },
+          {
+            "path": "Publish/README.md",
+            "role": "LLM instructions: how to run it, the app contract it expects, and exactly what to edit when the app changes."
+          }
+        ],
+        "data_flow": "app root (backend/ + frontend/ + data/) -> publish.py builds + vendors -> Publish/published_apps/<slug>_v{N}/ (install.* + application_core/) -> end user runs the installer -> ~/Documents/VibeFoundryApplications/<slug>/ + a Desktop launcher",
+        "dependencies": {
+          "build_time": [
+            "python3",
+            "node",
+            "internet"
+          ],
+          "end_user": [
+            "none — the installer lays down its own Miniforge + Node + env"
+          ]
+        },
+        "customization": {
+          "drop_in": [
+            "Copy the Publish/ folder into your app root (next to backend/, frontend/, data/), then run it."
+          ],
+          "edit_when_app_changes": [
+            "Adding a pip/npm dependency or a feature needs nothing.",
+            "TARGET_PY / PLATFORMS / external tools (codex) / backend entry point are the only knobs — see README.md."
+          ],
+          "rebrand": [
+            "Replace Publish/vf_logo.png."
           ]
         }
       }
