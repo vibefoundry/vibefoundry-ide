@@ -1,0 +1,17 @@
+# Frontend install / build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Backend Python cache
+backend/__pycache__/
+backend/*.pyc
+
+# Local environment — .env.example is the template that ships
+.env
+
+# Runtime outputs (per-session chatbot run folders)
+output/
+
+# Data files — students drop their own; don't ship sample data
+data/*
+!data/.gitkeep

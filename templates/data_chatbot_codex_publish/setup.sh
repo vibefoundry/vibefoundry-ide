@@ -1,0 +1,53 @@
+#!/bin/bash
+# Run: bash app_folder/scripts/data_chatbot_codex/setup.sh
+cd "$(dirname "$0")"
+
+echo "========================================"
+echo " Data Chatbot Setup"
+echo "========================================"
+
+echo ""
+echo "[1/3] Checking Codex CLI..."
+# The chatbot drives every model call through `codex exec`. If codex isn't on
+# PATH there is nothing for the backend to talk to — fail fast here instead of
+# at the first /api/ask.
+if command -v codex > /dev/null 2>&1; then
+    echo "      codex found: $(codex --version 2>&1 | head -1)"
+else
+    echo "ERROR: codex CLI not found on PATH."
+    echo "Install OpenAI Codex CLI and run 'codex login' before launching."
+    exit 1
+fi
+
+echo ""
+echo "[2/3] Checking Python dependencies..."
+if pip show flask > /dev/null 2>&1 && pip show polars > /dev/null 2>&1; then
+    echo "      Already installed, skipping."
+else
+    echo "      Installing Python dependencies..."
+    pip install -r backend/requirements.txt || { echo "ERROR: pip install failed"; exit 1; }
+fi
+
+echo ""
+echo "[3/3] Checking Node dependencies..."
+# The vite binary is the sentinel — the launcher invokes it. A half-installed
+# node_modules/ (missing .bin/vite) needs `npm install` to re-run. concurrently
+# is a declared devDependency, so this single install brings it in too — no
+# separate `npx`/`npm install concurrently` step needed.
+if [ -x "frontend/node_modules/.bin/vite" ] && [ -x "frontend/node_modules/.bin/concurrently" ]; then
+    echo "      Already installed, skipping."
+else
+    echo "      Installing Node dependencies (clean install)..."
+    # Nuke any residue from a prior interrupted install — leftover files with
+    # broken perms (EACCES on esbuild's postinstall, etc.) make `npm install`
+    # over the top fail. Starting clean guarantees a fresh, consistent tree.
+    rm -rf frontend/node_modules
+    cd frontend
+    npm install || { echo "ERROR: npm install failed"; exit 1; }
+    cd ..
+fi
+
+echo ""
+echo "========================================"
+echo " Setup complete! Run: bash app_folder/scripts/data_chatbot_codex/run_app.sh"
+echo "========================================"

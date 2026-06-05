@@ -510,6 +510,94 @@
           ]
         }
       }
+    },
+    {
+      "id": "data_chatbot_codex_publish",
+      "name": "Data Chatbot (Codex) — Publishable",
+      "track": 3,
+      "icon": "data_analyst.png",
+      "description": "The Codex CLI data chatbot, made publish-ready: it includes a drop-in Publish/ folder (publish.py + the LLM README) and the app-level changes (single-server frontend serving, heartbeat lifecycle, Windows codex fixes) so you can turn it into a self-contained one-click desktop installer for macOS + Windows. Same chatbot as data_chatbot_codex, plus one command to ship it as a desktop app.",
+      "use_cases": [
+        "Build a conversational analytics chatbot AND hand it to non-technical users as a desktop app",
+        "Ship an internal codex-powered data Q&A tool with no setup for the recipient",
+        "Reference for what a publish-ready app looks like (the Publish/README documents the exact edits)",
+        "Same analytics use cases as data_chatbot, with codegen routed through Codex CLI instead of the API",
+        "Environments where the LLM provider must be reached via a CLI agent rather than an HTTPS API"
+      ],
+      "architecture": {
+        "runtime": "Python 3.8+ (backend) and Node.js 16+ (frontend dev server). Modern browser. Codex CLI installed and on PATH for the codegen stage.",
+        "entry_point": "setup.sh (one-time install) then run_app.sh (launch both servers).",
+        "launcher": "setup.sh / setup.bat for first-run install; run_app.sh / run_app.bat to launch backend + frontend concurrently on auto-picked ports.",
+        "key_files": [
+          {
+            "path": "backend/app.py",
+            "role": "Flask orchestrator. Same pipeline as data_chatbot but routes the codegen stage through the Codex CLI."
+          },
+          {
+            "path": "backend/prompt.py",
+            "role": "Builds prompts for classify/codegen/answer. Codegen call is a subprocess invocation of the Codex CLI; classify and answer still use the OpenAI SDK."
+          },
+          {
+            "path": "backend/execute.py",
+            "role": "Runs the generated Polars code in a timeout-bounded subprocess and writes result.parquet."
+          },
+          {
+            "path": "backend/retry.py",
+            "role": "Feeds execution errors back into the next Codex CLI call for codegen retries."
+          },
+          {
+            "path": "backend/instructions.json",
+            "role": "Per-stage prompt config — system text, rules, model/CLI choice, retry budget."
+          },
+          {
+            "path": "backend/output_schema.json",
+            "role": "JSON Schema the codegen reply must match."
+          },
+          {
+            "path": "frontend/src/App.jsx",
+            "role": "Same chat UI as data_chatbot."
+          }
+        ],
+        "data_flow": "Browser POST /api/ask → SSE stream → classify (OpenAI API) → codegen (Codex CLI subprocess) → execute (Polars subprocess) → retry on traceback → answer (OpenAI API).",
+        "dependencies": {
+          "backend_python": [
+            "flask",
+            "flask-cors",
+            "polars",
+            "pyarrow"
+          ],
+          "frontend_node": [
+            "react",
+            "react-dom",
+            "vite",
+            "@vitejs/plugin-react"
+          ],
+          "external_cli": [
+            "Codex CLI (must be installed and on PATH)"
+          ]
+        },
+        "customization": {
+          "edit_for_chatbot_behavior": [
+            "backend/instructions.json — system text, per-stage rules, model/CLI args",
+            "backend/output_schema.json — codegen contract"
+          ],
+          "edit_for_ui": [
+            "frontend/src/App.jsx and sibling components"
+          ],
+          "drop_data": [
+            "data/*.parquet — drop your own parquets here"
+          ],
+          "env": {
+            "OPENAI_API_KEY": "Required for the classify and answer stages. Lives in .env next to run_app.sh.",
+            "CODEX_CLI": "Optional override for the CLI binary path; defaults to `codex` on PATH."
+          },
+          "notes": [
+            "Codex CLI must be installed on the machine running the backend. If you don't have it, use data_chatbot (pure API) instead.",
+            "Same data-privacy posture as data_chatbot: only metadata.json reaches the model, never the rows."
+          ]
+        },
+        "publishing": "Run `python Publish/publish.py \"App Name\"` to build a desktop installer. See Publish/README.md."
+      }
     }
   ]
 }
