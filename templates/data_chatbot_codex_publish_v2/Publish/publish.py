@@ -220,7 +220,7 @@ def build_runtime(package: Path, core: Path) -> None:
     print("  creating runtime env (python + nodejs + git) from conda-forge...")
     run([conda, "create", "-p", str(build_env), "-y",
          "-c", "conda-forge", "--override-channels",
-         f"python={TARGET_PY}", "nodejs", "git"])
+         f"python={TARGET_PY}", "pip", "nodejs", "git"])
 
     # 2. Install the app's Python deps INTO the env (replaces wheel vendoring —
     #    they ride along inside the packed runtime).
