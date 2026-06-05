@@ -15,8 +15,9 @@ Usage:
     python publish.py "My App Name"
     python publish.py            # prompts for the name
 
-Assumptions: run on macOS with Python 3, Node/npm, and internet. Target end users
-are Windows x64 and Apple Silicon macOS. See PUBLISH.md "Assumptions / limitations".
+Assumptions: run on the developer's machine (macOS or Windows) with Python 3,
+Node/npm, and internet. Target end users are Windows x64 and Apple Silicon macOS.
+(On Windows, building only produces the Windows assets — .icns needs a Mac.)
 """
 from __future__ import annotations
 
@@ -62,7 +63,10 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
     """Run a command, streaming output; raise with a clear message on failure."""
     printable = " ".join(str(c) for c in cmd)
     print(f"  $ {printable}")
-    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
+    # On Windows, npm/node (and other tools) ship as .cmd shims that CreateProcess
+    # can't launch by bare name — subprocess.run(["npm", ...]) fails with WinError 2.
+    # Running through the shell lets cmd.exe resolve them (list2cmdline quotes args).
+    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None, shell=(os.name == "nt"))
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({result.returncode}): {printable}")
 
