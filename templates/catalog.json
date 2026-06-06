@@ -512,6 +512,64 @@
       }
     },
     {
+      "id": "packaged_publish",
+      "name": "Packaged Publish — Desktop App Packager (conda-pack)",
+      "track": 0,
+      "icon": "data_analyst.png",
+      "description": "A drop-in Publish/ folder (publish.py + logo + an LLM README) that packages any VibeFoundry app — Flask backend + Vite frontend — into a self-contained, one-click desktop installer for macOS and Windows. Unlike the original Publish packager, this variant uses conda-pack to bundle the entire runtime (Python + Node + dependencies) into the installer, so end users need no internet at install time — the whole environment ships inside the package. Drop it into your app root and run it; most apps need no edits. Note: conda-pack cannot cross-build, so build on each OS you want to ship to.",
+      "use_cases": [
+        "Ship a desktop app that installs with zero downloads — the full runtime is packed into the installer",
+        "Hand off to users on locked-down or offline machines where install-time internet isn't available",
+        "Turn a finished chatbot / dashboard / agent app into a double-click desktop app for non-technical users",
+        "Reuse one download-free packaging pipeline across many apps by dropping the same folder in",
+        "Let an LLM customize packaging (Python version, platforms, external CLIs) against a documented contract"
+      ],
+      "architecture": {
+        "runtime": "Build-time: Python 3 + Node + conda on the developer machine (build once per target OS — conda-pack cannot cross-build). End user: the packed env is extracted in place — no toolchain, no downloads required.",
+        "entry_point": "Publish/publish.py — run `python Publish/publish.py \"App Name\"` from the app root.",
+        "launcher": "Emits install.command / install.bat (one-click installers) and run_app.command / run_app.bat (launchers) into Publish/published_apps/<slug>_v{N}/.",
+        "key_files": [
+          {
+            "path": "Publish/publish.py",
+            "role": "The packager: builds the frontend, conda-packs the entire Python+Node runtime, assembles application_core/, generates icons, and emits the installers + launchers."
+          },
+          {
+            "path": "Publish/vf_logo.png",
+            "role": "Branding — app icon, splash, favicon. Replace to rebrand."
+          },
+          {
+            "path": "Publish/README.md",
+            "role": "LLM instructions: how to run it, the app contract it expects, and exactly what to edit when the app changes."
+          }
+        ],
+        "data_flow": "app root (backend/ + frontend/ + data/) -> publish.py builds frontend + conda-packs the runtime -> Publish/published_apps/<slug>_v{N}/ (install.* + application_core/) -> end user runs the installer (no downloads) -> ~/Documents/VibeFoundryApplications/<slug>/ + a Desktop launcher",
+        "dependencies": {
+          "build_time": [
+            "python3",
+            "node",
+            "conda",
+            "conda-pack",
+            "internet"
+          ],
+          "end_user": [
+            "none — the packed runtime ships inside the installer, no downloads at install time"
+          ]
+        },
+        "customization": {
+          "drop_in": [
+            "Copy the Publish/ folder into your app root (next to backend/, frontend/, data/), then run it on each target OS."
+          ],
+          "edit_when_app_changes": [
+            "Adding a pip/npm dependency or a feature needs nothing.",
+            "TARGET_PY / PLATFORMS / external tools (codex) / backend entry point are the only knobs — see README.md."
+          ],
+          "rebrand": [
+            "Replace Publish/vf_logo.png."
+          ]
+        }
+      }
+    },
+    {
       "id": "data_chatbot_codex_publish",
       "name": "Data Chatbot (Codex) — Publishable",
       "track": 3,

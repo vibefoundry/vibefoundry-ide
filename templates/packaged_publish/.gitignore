@@ -1,0 +1,4 @@
+# Build output — large per-app runtimes; never commit / deploy these.
+published_apps/
+__pycache__/
+*.pyc
