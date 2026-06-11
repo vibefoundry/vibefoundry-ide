@@ -1,5 +1,0 @@
-# No third-party Python dependencies.
-# This template runs entirely in the browser (DuckDB-WASM + React UMD).
-# The Python files in this folder (serve.py, prepare_dev_assets.py,
-# build_app_package.py) use the standard library only, so no pip install
-# is required.
