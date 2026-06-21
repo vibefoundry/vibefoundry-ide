@@ -751,43 +751,6 @@ async def _cascade_templates_via_proxy(dest_root: Path, jwt: str, subpath: str =
     return written
 
 
-async def _list_proxy_template_entries(jwt: str) -> tuple[list[str], list[str]]:
-    """List the top-level entries under templates/ on the proxy.
-
-    Returns (dirs, files). Both are cascaded so a new template (folder or a
-    top-level asset like catalog.json / icons) ships by just dropping it at the
-    source — no client update required. AGENTS.md is excluded from the file
-    list because it's fetched separately to the project root, not into
-    templates/.
-    """
-    auth_headers = {"Authorization": f"Bearer {jwt}"}
-    timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        res = await client.get(PROXY_BASE_URL, headers=auth_headers)
-        res.raise_for_status()
-        entries = res.json()
-    dirs = [e["name"] for e in entries if e.get("type") == "dir"]
-    files = [e["name"] for e in entries if e.get("type") == "file" and e["name"] != "AGENTS.md"]
-    return dirs, files
-
-
-async def _cascade_top_level_file(dest_dir: Path, jwt: str, name: str) -> bool:
-    """Fetch a single top-level templates/<name> file into dest_dir/<name>.
-    Returns True on success. Raises on failure so the caller can log per-file.
-    """
-    file_headers = {
-        "Authorization": f"Bearer {jwt}",
-        "Accept": "application/vnd.github.raw",
-    }
-    timeout = httpx.Timeout(connect=10.0, read=60.0, write=30.0, pool=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        res = await client.get(f"{PROXY_BASE_URL}/{name}", headers=file_headers)
-        res.raise_for_status()
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        (dest_dir / name).write_bytes(res.content)
-    return True
-
-
 @app.post("/api/build")
 async def build_project():
     """Build the project structure — creates the input/output/app folders and
@@ -802,7 +765,9 @@ async def build_project():
     agents_md_written = False
 
     # Fetch AGENTS.md — try the authenticated proxy first, then fall back to
-    # the public website path for unauthenticated users.
+    # the public website path for unauthenticated users. The IDE-cascaded copy
+    # lives at IDE-Agents/AGENTS.md (the website-download variant lives in
+    # Templates-Agents/ and is only bundled into downloadable zips).
     stored = _read_stored_token()
     jwt = stored["token"] if stored else ""
     agents_dest = state.project_folder / "AGENTS.md"
@@ -811,7 +776,7 @@ async def build_project():
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.get(
-                    f"{PROXY_BASE_URL}/AGENTS.md",
+                    f"{PROXY_BASE_URL}/IDE-Agents/AGENTS.md",
                     headers={
                         "Authorization": f"Bearer {jwt}",
                         "Accept": "application/vnd.github.raw",
@@ -826,7 +791,7 @@ async def build_project():
     if not agents_md_written:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/AGENTS.md")
+                res = await client.get(f"{PUBLIC_TEMPLATE_FALLBACK_URL}/IDE-Agents/AGENTS.md")
                 if res.status_code == 200:
                     agents_dest.write_bytes(res.content)
                     agents_md_written = True
