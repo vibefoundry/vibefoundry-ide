@@ -447,15 +447,15 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
   }, [onClose])
 
   const ext = node.extension?.toLowerCase()
-  const isRunnable = !node.isDirectory && ['.py', '.sh', '.bat'].includes(ext)
-  const isRunCode = !node.isDirectory && ['.py', '.sh', '.bat'].includes(ext)
+  const isRunnable = !node.isDirectory && ['.py', '.sh', '.bat', '.command'].includes(ext)
+  const isRunCode = !node.isDirectory && ['.py', '.sh', '.bat', '.command'].includes(ext)
   const isConvertible = !node.isDirectory && ['.csv', '.xlsx', '.xls'].includes(ext)
 
   const handleCopyRunCommand = async () => {
     const absPath = projectPath ? `${projectPath}/${node.path}` : node.path
     let command
     if (ext === '.py') command = `python "${absPath}"`
-    else if (ext === '.sh') command = `bash "${absPath}"`
+    else if (ext === '.sh' || ext === '.command') command = `bash "${absPath}"`
     else if (ext === '.bat') command = `"${absPath}"`
     else return
 
@@ -477,7 +477,7 @@ const ContextMenu = ({ x, y, node, onClose, onAction, canWrite, projectPath }) =
     const absPath = projectPath ? `${projectPath}/${node.path}` : node.path
     let command
     if (ext === '.py') command = `python "${absPath}"`
-    else if (ext === '.sh') command = `bash "${absPath}"`
+    else if (ext === '.sh' || ext === '.command') command = `bash "${absPath}"`
     else if (ext === '.bat') command = `"${absPath}"`
     else return
 
