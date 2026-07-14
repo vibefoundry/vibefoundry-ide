@@ -3,6 +3,7 @@ import FileTree from './components/FileTree'
 import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
+import SharePointBrowser from './components/SharePointBrowser'
 import TemplatePickerModal from './components/TemplatePickerModal'
 import {
   getFileType,
@@ -89,6 +90,7 @@ function App() {
   const [canWrite, setCanWrite] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null) // 'saving', 'saved', 'error'
   const [showBuildModal, setShowBuildModal] = useState(false)
+  const [showSharePoint, setShowSharePoint] = useState(false)
   const [isScaffolding, setIsScaffolding] = useState(false)
   const [showTemplatesMenu, setShowTemplatesMenu] = useState(false)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
@@ -890,6 +892,9 @@ function App() {
             <button className="btn-flat" onClick={() => setShowBuildModal(true)}>
               Build
             </button>
+            <button className="btn-flat" onClick={() => setShowSharePoint(true)}>
+              SharePoint
+            </button>
             <div className="templates-menu-wrap" ref={templatesMenuRef}>
               <button
                 className="btn-flat"
@@ -1243,6 +1248,18 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showSharePoint && (
+        <SharePointBrowser
+          onCancel={() => setShowSharePoint(false)}
+          onPulled={async () => {
+            try {
+              const res = await fetch('/api/files/tree')
+              if (res.ok) { const data = await res.json(); setTree([data.tree]) }
+            } catch {}
+          }}
+        />
       )}
 
       {showFolderPicker && (
