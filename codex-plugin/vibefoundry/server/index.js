@@ -81,17 +81,46 @@ function healthCheck(timeoutMs) {
 
 // Ensure the backend is up. Reuses an already-running instance (started
 // manually or by a prior call) via the health check before spawning a new one.
+// Resolve the Python interpreter that OWNS this package so we can run
+// `python -m vibefoundry` directly — no PATH guessing, works on any OS.
+// pane_mcp/index.js lives at <env>/.../site-packages/vibefoundry/pane_mcp/.
+function resolveBundledPython() {
+  var candidates =
+    process.platform === "win32"
+      ? [path.join(__dirname, "..", "..", "..", "..", "python.exe")] // <env>\Lib\site-packages\vibefoundry\pane_mcp -> <env>\python.exe
+      : [
+          path.join(__dirname, "..", "..", "..", "..", "..", "bin", "python3"),
+          path.join(__dirname, "..", "..", "..", "..", "..", "bin", "python"),
+        ]; // <env>/lib/pythonX/site-packages/vibefoundry/pane_mcp -> <env>/bin/python
+  for (var i = 0; i < candidates.length; i++) {
+    try { if (fs.existsSync(candidates[i])) return candidates[i]; } catch (e) {}
+  }
+  return null;
+}
+
 async function ensureBackend(project) {
   if (await healthCheck(800)) return { started: false, ok: true };
 
-  var shell = process.env.SHELL || "/bin/zsh";
-  var cmd = BACKEND_CMD;
-  if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
   try {
-    backendChild = spawn(shell, ["-lc", cmd], {
-      stdio: "ignore",
-      env: process.env,
-    });
+    var py = resolveBundledPython();
+    if (py) {
+      // Preferred: run the exact interpreter that has vibefoundry installed.
+      var args = ["-m", "vibefoundry", "--port", String(BACKEND_PORT), "--no-browser"];
+      if (project) args.push(project);
+      backendChild = spawn(py, args, { stdio: "ignore", env: process.env, windowsHide: true });
+    } else {
+      // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
+      var cmd = BACKEND_CMD;
+      if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
+      if (process.platform === "win32") {
+        backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], {
+          stdio: "ignore", env: process.env, windowsHide: true,
+        });
+      } else {
+        var shell = process.env.SHELL || "/bin/zsh";
+        backendChild = spawn(shell, ["-lc", cmd], { stdio: "ignore", env: process.env });
+      }
+    }
     backendChild.on("error", function () {});
   } catch (e) {
     return { started: false, ok: false, error: String(e && e.message) };
