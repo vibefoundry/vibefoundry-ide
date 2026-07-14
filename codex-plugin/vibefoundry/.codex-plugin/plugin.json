@@ -1,0 +1,13 @@
+{
+  "name": "vibefoundry",
+  "version": "0.0.1",
+  "description": "VibeFoundry — opens a data-science IDE pane inside ChatGPT / Codex.",
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "VibeFoundry",
+    "description": "Open the VibeFoundry data-science pane."
+  },
+  "author": "VibeFoundry",
+  "license": "MIT"
+}

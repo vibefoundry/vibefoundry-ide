@@ -27,7 +27,16 @@ cd frontend
 npm install
 echo "Building frontend..."
 npm run build
+echo "Building Codex pane bundle..."
+npm run build:pane
 cd ..
+
+# Sync the pane MCP (Node server + built pane HTML) into the pip package so it
+# ships as package data (used by the Codex desktop-app plugin).
+echo "Packaging pane MCP..."
+mkdir -p src/vibefoundry/pane_mcp/pane
+cp codex-plugin/vibefoundry/server/index.js src/vibefoundry/pane_mcp/index.js
+cp codex-plugin/vibefoundry/server/pane/index.pane.html src/vibefoundry/pane_mcp/pane/index.pane.html
 
 # Build Python package
 echo "Building Python package..."

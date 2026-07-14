@@ -62,10 +62,22 @@ function App() {
     // Mark that a sign-in is in flight; the auth-status poller picks this up
     // and shows the confirmation modal when status flips to signed-in.
     localStorage.setItem('vf_signin_pending', '1')
-    window.open(url, '_blank', 'noopener')
+    // In the pane, window.open is blocked by the sandbox — use the Apps SDK's
+    // openExternal so sign-in opens in the system browser. The browser hits the
+    // local /auth/callback, the backend stores the token, and the status poller
+    // below flips to signed-in.
+    if (typeof window !== 'undefined' && window.openai && window.openai.openExternal) {
+      window.openai.openExternal({ href: url })
+    } else {
+      window.open(url, '_blank', 'noopener')
+    }
   }
 
   const isSignedIn = authStatus.signedIn
+  // True when running inside the Codex / ChatGPT desktop-app pane (window.openai
+  // is injected by the host). Used to hide IDE-only chrome that has no meaning
+  // in the pane. The standalone pip app never sets this, so it's unaffected.
+  const isPane = typeof window !== 'undefined' && !!window.openai
 
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
@@ -451,6 +463,27 @@ function App() {
       setLoading(false)
     }
   }
+
+  // Pane mode (Codex / ChatGPT desktop app): the backend is already launched
+  // with a project folder, so skip the picker and load that folder directly.
+  // Gated on window.openai so the standalone app keeps its normal picker.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.openai) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/folder/info')
+        if (!res.ok) return
+        const info = await res.json()
+        if (!cancelled && info.project_folder) {
+          handleFolderSelected(info.project_folder)
+        }
+      } catch (e) {
+        /* leave the picker as a fallback */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const handleFileSelect = async (file) => {
     if (file.isDirectory) return
@@ -910,6 +943,7 @@ function App() {
             </div>
           </div>
           <div className="top-bar-section top-bar-right">
+            {!isPane && (<>
             <button
               className="btn-flat"
               onClick={async () => {
@@ -974,6 +1008,7 @@ function App() {
             >
               Gemini
             </button>
+            </>)}
             <button className="btn-flat btn-auth" onClick={handleAuthToggle}>
               {isSignedIn ? 'Sign out' : 'Sign in'}
             </button>
@@ -1101,8 +1136,8 @@ function App() {
             </div>
           )}
 
-          {/* Script Runner Panel */}
-          {canWrite && tree.length > 0 && (
+          {/* Script Runner Panel — hidden in the pane */}
+          {!isPane && canWrite && tree.length > 0 && (
             <>
               <div
                 className="script-runner-resize-handle"

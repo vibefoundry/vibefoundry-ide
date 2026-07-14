@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { createFolder, createFile, deleteEntry, renameEntry, moveEntry, getParentHandle } from '../utils/fileSystem'
+import FilePicker from './FilePicker'
 
 // Backend tree paths are project-relative POSIX (e.g. "templates",
 // "templates/dashboard_pwa_duckdb/run_app.sh"). The leading-slash variants are kept in
@@ -733,6 +734,7 @@ const FileTree = ({
   const [newItemDialog, setNewItemDialog] = useState(null)
   const [deleteDialog, setDeleteDialog] = useState(null)
   const [uploadStatus, setUploadStatus] = useState(null) // { uploading: bool, converting: bool, filename: str }
+  const [dataCopyFolder, setDataCopyFolder] = useState(null) // pane-mode "Add Data" target folder (project-relative)
   const [draggedPath, setDraggedPath] = useState(null)
   const [draggedNode, setDraggedNode] = useState(null)
   const [dropTargetPath, setDropTargetPath] = useState(null)
@@ -922,6 +924,13 @@ const FileTree = ({
         break
 
       case 'addData':
+        // Pane mode (Codex desktop app): the sandboxed browser can't open a
+        // file dialog or upload, so browse the local filesystem and have the
+        // backend copy the chosen file into the folder (see /api/files/copy).
+        if (typeof window !== 'undefined' && window.openai) {
+          setDataCopyFolder(node.path)
+          break
+        }
         // Check if we have File System Access API (browser mode) or need to use backend API
         if (node.handle) {
           // Browser mode - use File System Access API
@@ -1664,6 +1673,38 @@ const FileTree = ({
             </div>
           </div>
         </div>,
+        document.body
+      )}
+
+      {/* Pane-mode "Add Data": browse local files; backend copies the pick in */}
+      {dataCopyFolder !== null && createPortal(
+        <FilePicker
+          destName={dataCopyFolder.split('/').pop() || 'project'}
+          onCancel={() => setDataCopyFolder(null)}
+          onSelect={async (sourcePath) => {
+            const dest = dataCopyFolder
+            setDataCopyFolder(null)
+            const name = sourcePath.split('/').pop()
+            try {
+              setUploadStatus({ converting: false, filename: name })
+              const res = await fetch('/api/files/copy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sourcePath, destFolder: dest }),
+              })
+              setUploadStatus(null)
+              if (!res.ok) {
+                const d = await res.json().catch(() => ({}))
+                throw new Error(d.detail || 'Copy failed')
+              }
+              setExpandedPaths((prev) => new Set([...prev, dest]))
+              if (onRefresh) onRefresh()
+            } catch (err) {
+              setUploadStatus(null)
+              alert('Failed to add data: ' + err.message)
+            }
+          }}
+        />,
         document.body
       )}
     </div>

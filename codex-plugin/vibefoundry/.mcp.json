@@ -1,0 +1,8 @@
+{
+  "vibefoundry": {
+    "command": "node",
+    "args": [
+      "/Users/angelobenedicto/Documents/GitHub/VibeFoundryCodexPlugin/codex-plugin/vibefoundry/server/index.js"
+    ]
+  }
+}

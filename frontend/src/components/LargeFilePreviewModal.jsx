@@ -22,6 +22,10 @@ const ROW_LIMIT_OPTIONS = [
   { label: 'All rows (use filters)', value: null },
 ]
 
+// In the Codex pane, WebSockets are inert, so the WS-driven profile_complete
+// event never arrives. There we poll the result endpoint instead.
+const IS_PANE = typeof window !== 'undefined' && !!window.openai
+
 const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
   const [stage, setStage] = useState('intro')
   const [progress, setProgress] = useState({ done: 0, total: 1 })
@@ -36,6 +40,10 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
   const [dropdownSearch, setDropdownSearch] = useState('')
   const estimateTimerRef = useRef(null)
   const dropdownRef = useRef(null)
+  const pollRef = useRef(null)
+
+  // Clear the pane profile poller on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -96,10 +104,40 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
         setProfile(data.profile)
         setEstimatedRows(data.profile.total_rows || content.totalRows)
         setStage('filtering')
+      } else if (IS_PANE) {
+        // WebSockets are inert in the pane, so profile_complete never arrives —
+        // poll the result endpoint until profiling finishes.
+        pollForProfile()
       }
     } catch (err) {
       console.error('Failed to start profiling:', err)
     }
+  }
+
+  const pollForProfile = () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    let tries = 0
+    pollRef.current = setInterval(async () => {
+      tries += 1
+      try {
+        const r = await fetch(`/api/dataframe/profile/result?filePath=${encodeURIComponent(content.filePath)}`)
+        if (r.ok) {
+          const d = await r.json()
+          if (d && d.profile && (d.profile.total_rows != null || d.profile.columns)) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setProfile(d.profile)
+            setEstimatedRows(d.profile.total_rows || content.totalRows)
+            setStage('filtering')
+            return
+          }
+        }
+      } catch {}
+      if (tries > 600) {  // ~10 min safety net
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }, 1000)
   }
 
   // Debounced row estimation when filters change
@@ -367,10 +405,15 @@ const LargeFilePreviewModal = ({ content, onPreviewReady, onCancel }) => {
               </div>
               <div className="lfp-progress-container">
                 <div className="lfp-progress-bar">
-                  <div className="lfp-progress-fill" style={{ width: `${progressPct}%` }} />
+                  <div
+                    className="lfp-progress-fill"
+                    style={{ width: IS_PANE ? '100%' : `${progressPct}%`, opacity: IS_PANE ? 0.5 : 1 }}
+                  />
                 </div>
                 <span className="lfp-progress-text">
-                  {progress.done} / {progress.total} chunks &middot; {progressPct}%
+                  {IS_PANE
+                    ? 'Scanning the file… this can take a moment.'
+                    : `${progress.done} / ${progress.total} chunks · ${progressPct}%`}
                 </span>
               </div>
             </div>

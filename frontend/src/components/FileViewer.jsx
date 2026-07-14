@@ -1,17 +1,66 @@
+import { useState, useEffect } from 'react'
 import DataFrameViewer from './DataFrameViewer'
 import LargeFilePreviewModal from './LargeFilePreviewModal'
 import JsonViewer from './JsonViewer'
 import CodeViewer from './CodeViewer'
 import MarkdownViewer from './MarkdownViewer'
 
-const PdfViewer = ({ content }) => (
-  <div className="pdf-viewer">
-    <iframe
-      src={`/api/pdf?path=${encodeURIComponent(content.path)}`}
-      title={content.filename}
-    />
-  </div>
-)
+// In the Codex pane, direct <img src="/api/image">/<iframe src="/api/pdf"> bypass
+// the callTool proxy and fail. There we fetch the file as base64 through the
+// proxy and render a data: URL. In the standalone app (no window.openai) this is
+// inert — the original direct URL is used, exactly as before.
+const IS_PANE = typeof window !== 'undefined' && !!window.openai
+
+const useDataUrl = (path) => {
+  const [dataUrl, setDataUrl] = useState(null)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    if (!IS_PANE) return
+    let cancelled = false
+    setDataUrl(null)
+    setError(null)
+    fetch(`/api/file-base64?path=${encodeURIComponent(path)}`)
+      .then((r) =>
+        r.ok ? r.json() : r.json().then((d) => Promise.reject(new Error(d.detail || 'Failed to load')))
+      )
+      .then((d) => { if (!cancelled) setDataUrl(`data:${d.contentType};base64,${d.base64}`) })
+      .catch((e) => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
+  }, [path])
+  return { dataUrl, error }
+}
+
+const ImageViewer = ({ content }) => {
+  const { dataUrl, error } = useDataUrl(content.path)
+  const src = IS_PANE ? dataUrl : `/api/image?path=${encodeURIComponent(content.path)}`
+  return (
+    <div className="image-viewer">
+      {error ? (
+        <p>Failed to load image: {error}</p>
+      ) : IS_PANE && !src ? (
+        <p>Loading image…</p>
+      ) : (
+        <img src={src} alt={content.filename} />
+      )}
+    </div>
+  )
+}
+
+const PdfViewer = ({ content }) => {
+  const { dataUrl, error } = useDataUrl(content.path)
+  const src = IS_PANE ? dataUrl : `/api/pdf?path=${encodeURIComponent(content.path)}`
+  return (
+    <div className="pdf-viewer">
+      {error ? (
+        <p>Failed to load PDF: {error}</p>
+      ) : IS_PANE && !src ? (
+        <p>Loading PDF…</p>
+      ) : (
+        <iframe src={src} title={content.filename} />
+      )}
+    </div>
+  )
+}
 
 const DocxViewer = ({ content }) => {
   return (
@@ -64,14 +113,7 @@ const FileViewer = ({ content, canWrite, onSave, onSheetChange, saveStatus, onLa
       case 'docx':
         return <DocxViewer content={content} />
       case 'image':
-        return (
-          <div className="image-viewer">
-            <img
-              src={`/api/image?path=${encodeURIComponent(content.path)}`}
-              alt={content.filename}
-            />
-          </div>
-        )
+        return <ImageViewer content={content} />
       case 'pdf':
         return <PdfViewer content={content} />
       case 'json':

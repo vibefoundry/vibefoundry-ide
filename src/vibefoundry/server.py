@@ -1251,21 +1251,24 @@ async def list_directory(path: str = ""):
         raise HTTPException(status_code=400, detail="Path is not a directory")
 
     folders = []
+    files = []
     try:
         for item in sorted(target.iterdir()):
-            # Only show directories, skip hidden files
-            if item.is_dir() and not item.name.startswith('.'):
-                folders.append({
-                    "name": item.name,
-                    "path": str(item)
-                })
+            # Skip hidden entries
+            if item.name.startswith('.'):
+                continue
+            if item.is_dir():
+                folders.append({"name": item.name, "path": str(item)})
+            elif item.is_file():
+                files.append({"name": item.name, "path": str(item)})
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied")
 
     return {
         "current": str(target),
         "parent": str(target.parent) if target.parent != target else None,
-        "folders": folders
+        "folders": folders,
+        "files": files,
     }
 
 
@@ -1779,6 +1782,41 @@ async def get_image(path: str):
     return FileResponse(file_path, media_type=media_type)
 
 
+@app.get("/api/file-base64")
+async def get_file_base64(path: str):
+    """Return a file as {contentType, base64}, for the Codex desktop pane.
+
+    The sandboxed pane can't load <img src="/api/image"> or <iframe
+    src="/api/pdf"> directly — those bypass the MCP proxy. This JSON endpoint
+    goes through the proxy fine, and the pane renders the result as a data: URL.
+    """
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    file_path = state.project_folder / path
+    try:
+        file_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    content_types = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+        '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
+    }
+    content_type = content_types.get(ext, 'application/octet-stream')
+
+    import base64
+    return {
+        "contentType": content_type,
+        "base64": base64.b64encode(file_path.read_bytes()).decode('ascii'),
+        "filename": file_path.name,
+    }
+
+
 @app.get("/api/pdf")
 async def get_pdf(path: str):
     """Serve PDF files directly with application/pdf media type for inline iframe rendering."""
@@ -2126,6 +2164,294 @@ async def move_file(request: MoveRequest):
     generate_metadata(state.project_folder)
 
     return {"success": True, "sourcePath": str(source_path), "destPath": str(dest_path)}
+
+
+class CopyRequest(BaseModel):
+    sourcePath: str   # absolute path to a file ANYWHERE on the local machine
+    destFolder: str   # project-relative destination folder
+
+
+@app.post("/api/files/copy")
+async def copy_file(request: CopyRequest):
+    """Copy a file from anywhere on the local machine into a project folder.
+
+    Used by "Add Data" in the Codex desktop pane, where the sandboxed browser
+    can't upload. Unlike /api/files/move, the SOURCE may live outside the
+    project (that's the whole point — pulling external data in); only the
+    DESTINATION is constrained to the project folder.
+    """
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+
+    source_path = Path(request.sourcePath).expanduser()
+    if not source_path.is_absolute():
+        raise HTTPException(status_code=400, detail="Source must be an absolute path")
+    if not source_path.exists() or not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    base = request.destFolder.strip("/")
+    if ".." in Path(base).parts:
+        raise HTTPException(status_code=400, detail="Invalid destination")
+    dest_dir = state.project_folder / base if base else state.project_folder
+    dest_path = dest_dir / source_path.name
+
+    # Destination must resolve inside the project folder.
+    try:
+        dest_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    import shutil
+    shutil.copy2(str(source_path), str(dest_path))
+
+    # Regenerate metadata so the new data shows up in the schema digest.
+    generate_metadata(state.project_folder)
+
+    return {"success": True, "path": str(dest_path.relative_to(state.project_folder))}
+
+
+# ============================================================================
+# SharePoint connector — delegated user-SSO, NO Graph API
+# ----------------------------------------------------------------------------
+# Pulls files from a SharePoint document library into input_folder. The user
+# signs in with their own M365 account (OAuth auth-code + PKCE, public client),
+# and we call the SharePoint REST API (_api/web/...) on their behalf. No Graph,
+# no app secret. Azure AD app: multi-tenant, public client, delegated
+# AllSites.Read (client_id below). All endpoints are additive.
+# ============================================================================
+import hashlib as _sp_hashlib
+import base64 as _sp_base64
+from urllib.parse import quote as _sp_quote, urlencode as _sp_urlencode
+
+SHAREPOINT_CLIENT_ID = "99c7eaae-457d-4d7a-be97-5674fe6d29c5"
+SHAREPOINT_REDIRECT_URI = "http://localhost:8765/auth/sharepoint/callback"
+SHAREPOINT_AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0"
+
+# Pending auth states: state -> {"verifier": str, "host": str}
+_sp_pending: dict = {}
+
+
+def _sp_config_path() -> Path:
+    home = Path.home() / ".vibefoundry"
+    home.mkdir(exist_ok=True)
+    return home / "sharepoint.json"
+
+
+def _sp_read() -> dict:
+    try:
+        return json.loads(_sp_config_path().read_text())
+    except Exception:
+        return {}
+
+
+def _sp_write(data: dict) -> None:
+    _sp_config_path().write_text(json.dumps(data))
+
+
+def _sp_scope(host: str) -> str:
+    return f"https://{host}/AllSites.Read offline_access"
+
+
+def _sp_pkce():
+    verifier = secrets.token_urlsafe(64)
+    challenge = _sp_base64.urlsafe_b64encode(
+        _sp_hashlib.sha256(verifier.encode()).digest()
+    ).decode().rstrip("=")
+    return verifier, challenge
+
+
+def _sp_callback_html(message: str) -> str:
+    return (
+        "<html><body style='font-family:-apple-system,sans-serif;padding:48px;text-align:center'>"
+        "<h2>VibeFoundry &times; SharePoint</h2>"
+        f"<p>{message}</p></body></html>"
+    )
+
+
+class SharePointConfigRequest(BaseModel):
+    host: str   # e.g. "diageo.sharepoint.com"
+    site: str   # e.g. "/sites/nam-exp-bnltc-ia"
+
+
+@app.get("/api/sharepoint/config")
+async def sharepoint_get_config():
+    cfg = _sp_read()
+    return {"host": cfg.get("host"), "site": cfg.get("site"), "connected": bool(cfg.get("refresh_token"))}
+
+
+@app.post("/api/sharepoint/config")
+async def sharepoint_set_config(request: SharePointConfigRequest):
+    cfg = _sp_read()
+    cfg["host"] = request.host.strip().replace("https://", "").rstrip("/")
+    cfg["site"] = "/" + request.site.strip().strip("/")
+    _sp_write(cfg)
+    return {"host": cfg["host"], "site": cfg["site"]}
+
+
+@app.post("/api/sharepoint/auth/start")
+async def sharepoint_auth_start():
+    cfg = _sp_read()
+    host = cfg.get("host")
+    if not host:
+        raise HTTPException(status_code=400, detail="Set SharePoint host/site first (/api/sharepoint/config)")
+    verifier, challenge = _sp_pkce()
+    state_nonce = secrets.token_urlsafe(24)
+    _sp_pending[state_nonce] = {"verifier": verifier, "host": host}
+    params = {
+        "client_id": SHAREPOINT_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": SHAREPOINT_REDIRECT_URI,
+        "response_mode": "query",
+        "scope": _sp_scope(host),
+        "state": state_nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    return {"url": f"{SHAREPOINT_AUTHORITY}/authorize?{_sp_urlencode(params)}"}
+
+
+@app.get("/auth/sharepoint/callback")
+async def sharepoint_auth_callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
+    if error:
+        return HTMLResponse(_sp_callback_html(f"Sign-in failed: {error_description or error}"), status_code=400)
+    pending = _sp_pending.pop(state, None)
+    if not code or not pending:
+        return HTMLResponse(_sp_callback_html("Invalid or expired sign-in state."), status_code=400)
+    host = pending["host"]
+    data = {
+        "client_id": SHAREPOINT_CLIENT_ID,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": SHAREPOINT_REDIRECT_URI,
+        "code_verifier": pending["verifier"],
+        "scope": _sp_scope(host),
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(f"{SHAREPOINT_AUTHORITY}/token", data=data)
+    if resp.status_code != 200:
+        return HTMLResponse(_sp_callback_html(f"Token exchange failed: {resp.text[:400]}"), status_code=400)
+    tok = resp.json()
+    cfg = _sp_read()
+    cfg["refresh_token"] = tok.get("refresh_token")
+    cfg["access_token"] = tok.get("access_token")
+    cfg["expires_at"] = int(time.time()) + int(tok.get("expires_in", 3600)) - 60
+    _sp_write(cfg)
+    return HTMLResponse(_sp_callback_html("SharePoint connected ✓ &mdash; you can close this tab and return to VibeFoundry."))
+
+
+async def _sp_access_token() -> str:
+    cfg = _sp_read()
+    if not cfg.get("refresh_token"):
+        raise HTTPException(status_code=401, detail="Not connected to SharePoint")
+    if cfg.get("access_token") and cfg.get("expires_at", 0) > time.time():
+        return cfg["access_token"]
+    data = {
+        "client_id": SHAREPOINT_CLIENT_ID,
+        "grant_type": "refresh_token",
+        "refresh_token": cfg["refresh_token"],
+        "scope": _sp_scope(cfg["host"]),
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(f"{SHAREPOINT_AUTHORITY}/token", data=data)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail=f"SharePoint token refresh failed: {resp.text[:200]}")
+    tok = resp.json()
+    cfg["access_token"] = tok.get("access_token")
+    cfg["expires_at"] = int(time.time()) + int(tok.get("expires_in", 3600)) - 60
+    if tok.get("refresh_token"):
+        cfg["refresh_token"] = tok["refresh_token"]
+    _sp_write(cfg)
+    return cfg["access_token"]
+
+
+@app.get("/api/sharepoint/status")
+async def sharepoint_status():
+    cfg = _sp_read()
+    return {"connected": bool(cfg.get("refresh_token")), "host": cfg.get("host"), "site": cfg.get("site")}
+
+
+@app.get("/api/sharepoint/list")
+async def sharepoint_list(folder: str = ""):
+    cfg = _sp_read()
+    host, site = cfg.get("host"), cfg.get("site")
+    if not host or not site:
+        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+    token = await _sp_access_token()
+    rel = folder.strip() or f"{site}/Shared Documents"
+    encoded = _sp_quote(rel.replace("'", "''"), safe="/")
+    base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        f_resp = await client.get(f"{base}/Files", headers=headers)
+        d_resp = await client.get(f"{base}/Folders", headers=headers)
+    if f_resp.status_code != 200:
+        raise HTTPException(status_code=f_resp.status_code, detail=f"SharePoint list failed: {f_resp.text[:300]}")
+    files = [
+        {"name": x.get("Name"), "serverRelativeUrl": x.get("ServerRelativeUrl"), "size": x.get("Length")}
+        for x in f_resp.json().get("value", [])
+    ]
+    folders = []
+    if d_resp.status_code == 200:
+        folders = [
+            {"name": x.get("Name"), "serverRelativeUrl": x.get("ServerRelativeUrl")}
+            for x in d_resp.json().get("value", [])
+            if x.get("Name") and x["Name"] != "Forms"
+        ]
+    return {"current": rel, "files": files, "folders": folders}
+
+
+class SharePointDownloadRequest(BaseModel):
+    serverRelativeUrl: str
+    destFolder: str = "input_folder"
+
+
+@app.post("/api/sharepoint/download")
+async def sharepoint_download(request: SharePointDownloadRequest):
+    if not state.project_folder:
+        raise HTTPException(status_code=400, detail="No project folder selected")
+    cfg = _sp_read()
+    host, site = cfg.get("host"), cfg.get("site")
+    if not host or not site:
+        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+    token = await _sp_access_token()
+
+    name = request.serverRelativeUrl.rstrip("/").split("/")[-1]
+    base = request.destFolder.strip("/")
+    if ".." in Path(base).parts:
+        raise HTTPException(status_code=400, detail="Invalid destination")
+    dest_dir = state.project_folder / base if base else state.project_folder
+    dest_path = dest_dir / name
+    try:
+        dest_path.resolve().relative_to(state.project_folder.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    encoded = _sp_quote(request.serverRelativeUrl.replace("'", "''"), safe="/")
+    url = f"https://{host}{site}/_api/web/GetFileByServerRelativeUrl('{encoded}')/$value"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=300) as client:
+        async with client.stream("GET", url, headers=headers) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                raise HTTPException(status_code=resp.status_code, detail=f"SharePoint download failed: {body[:300]!r}")
+            with open(dest_path, "wb") as fh:
+                async for chunk in resp.aiter_bytes(65536):
+                    fh.write(chunk)
+
+    generate_metadata(state.project_folder)
+    return {"success": True, "path": str(dest_path.relative_to(state.project_folder))}
+
+
+@app.post("/api/sharepoint/signout")
+async def sharepoint_signout():
+    cfg = _sp_read()
+    for k in ("refresh_token", "access_token", "expires_at"):
+        cfg.pop(k, None)
+    _sp_write(cfg)
+    return {"connected": False}
 
 
 # DataFrame streaming endpoints
