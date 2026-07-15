@@ -107,6 +107,10 @@ def main(args: Optional[list[str]] = None):
     host = parsed_args.host
     local_url = f"http://{host}:{port}"
 
+    # The server builds OAuth redirect URIs from this — the port is only known
+    # here, and it drifts off 8765 whenever that port is already taken.
+    os.environ["VIBEFOUNDRY_PORT"] = str(port)
+
     print(f"Starting VibeFoundry IDE v{__version__}")
     print(f"App: {local_url}")
 

@@ -26,7 +26,7 @@ function App() {
     const fetchStatus = async () => {
       try {
         const res = await fetch('/api/auth/status')
-        if (!res.ok) return
+        if (!res.ok) throw new Error(`auth status ${res.status}`)
         const data = await res.json()
         if (!cancelled) {
           setAuthStatus({ ...data, loading: false })
@@ -38,7 +38,10 @@ function App() {
           }
         }
       } catch {
-        if (!cancelled) setAuthStatus({ signedIn: false, loading: false })
+        // Must clear loading on every path: the gate below renders null while
+        // loading, so a stuck flag is a permanently blank window. Keep the last
+        // known signedIn so a transient blip doesn't bounce the user to the gate.
+        if (!cancelled) setAuthStatus((prev) => ({ ...prev, loading: false }))
       }
     }
     fetchStatus()

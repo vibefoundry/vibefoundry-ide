@@ -2226,8 +2226,21 @@ import base64 as _sp_base64
 from urllib.parse import quote as _sp_quote, urlencode as _sp_urlencode
 
 SHAREPOINT_CLIENT_ID = "99c7eaae-457d-4d7a-be97-5674fe6d29c5"
-SHAREPOINT_REDIRECT_URI = "http://localhost:8765/auth/sharepoint/callback"
 SHAREPOINT_AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0"
+
+
+def _sp_redirect_uri() -> str:
+    """Loopback redirect URI, built from the port we actually bound.
+
+    Not a constant: the CLI falls back to 8766+ when 8765 is taken, and a pinned
+    port silently breaks sign-in. 127.0.0.1 rather than localhost, which can
+    resolve to ::1 where nothing listens (uvicorn binds IPv4).
+
+    Requires the Azure app registration to be a public client with a loopback
+    redirect — those match port-agnostically, so one registration covers any port.
+    """
+    port = os.environ.get("VIBEFOUNDRY_PORT", "8765")
+    return f"http://127.0.0.1:{port}/auth/sharepoint/callback"
 
 # Pending auth states: state -> {"verifier": str, "host": str}
 _sp_pending: dict = {}
@@ -2302,7 +2315,7 @@ async def sharepoint_auth_start():
     params = {
         "client_id": SHAREPOINT_CLIENT_ID,
         "response_type": "code",
-        "redirect_uri": SHAREPOINT_REDIRECT_URI,
+        "redirect_uri": _sp_redirect_uri(),
         "response_mode": "query",
         "scope": _sp_scope(host),
         "state": state_nonce,
@@ -2324,7 +2337,7 @@ async def sharepoint_auth_callback(code: str = "", state: str = "", error: str =
         "client_id": SHAREPOINT_CLIENT_ID,
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": SHAREPOINT_REDIRECT_URI,
+        "redirect_uri": _sp_redirect_uri(),
         "code_verifier": pending["verifier"],
         "scope": _sp_scope(host),
     }

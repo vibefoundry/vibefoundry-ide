@@ -66,6 +66,32 @@ const BACKEND_CMD =
 
 let backendChild = null;
 
+function backendAlive() {
+  return !!backendChild && backendChild.exitCode === null && !backendChild.signalCode;
+}
+
+// Tear down the backend we spawned. Without this the child reparents to init and
+// squats BACKEND_PORT forever — every later launch then drifts to another port.
+// We signal the process GROUP (negative pid): the shell fallback runs python as a
+// grandchild, so signalling the shell alone would leave python behind.
+function killBackend() {
+  if (!backendAlive()) { backendChild = null; return; }
+  var pid = backendChild.pid;
+  backendChild = null;
+  try {
+    // win32 has no process groups; the preferred path there spawns python
+    // directly, so a plain kill covers it.
+    process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
+  } catch (e) {}
+}
+
+["exit", "SIGINT", "SIGTERM", "SIGHUP"].forEach(function (sig) {
+  process.on(sig, function () {
+    killBackend();
+    if (sig !== "exit") process.exit(0);
+  });
+});
+
 function sleep(ms) {
   return new Promise(function (r) { setTimeout(r, ms); });
 }
@@ -101,29 +127,41 @@ function resolveBundledPython() {
 async function ensureBackend(project) {
   if (await healthCheck(800)) return { started: false, ok: true };
 
-  try {
-    var py = resolveBundledPython();
-    if (py) {
-      // Preferred: run the exact interpreter that has vibefoundry installed.
-      var args = ["-m", "vibefoundry", "--port", String(BACKEND_PORT), "--no-browser"];
-      if (project) args.push(project);
-      backendChild = spawn(py, args, { stdio: "ignore", env: process.env, windowsHide: true });
-    } else {
-      // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
-      var cmd = BACKEND_CMD;
-      if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
-      if (process.platform === "win32") {
-        backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], {
-          stdio: "ignore", env: process.env, windowsHide: true,
-        });
+  // Never stack a second backend on the same port. We pass an explicit --port,
+  // so there is no free-port fallback: the loser can't bind and lingers as a
+  // dead process holding nothing. If a prior call is still booting one, wait.
+  if (!backendAlive()) {
+    try {
+      // detached: own process group, so killBackend can signal the whole tree.
+      var opts = {
+        stdio: "ignore",
+        env: process.env,
+        windowsHide: true,
+        detached: process.platform !== "win32",
+      };
+      var py = resolveBundledPython();
+      if (py) {
+        // Preferred: run the exact interpreter that has vibefoundry installed.
+        var args = ["-m", "vibefoundry", "--port", String(BACKEND_PORT), "--no-browser"];
+        if (project) args.push(project);
+        backendChild = spawn(py, args, opts);
       } else {
-        var shell = process.env.SHELL || "/bin/zsh";
-        backendChild = spawn(shell, ["-lc", cmd], { stdio: "ignore", env: process.env });
+        // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
+        var cmd = BACKEND_CMD;
+        if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
+        if (process.platform === "win32") {
+          backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], opts);
+        } else {
+          var shell = process.env.SHELL || "/bin/sh";
+          backendChild = spawn(shell, ["-lc", cmd], opts);
+        }
       }
+      backendChild.on("error", function () {});
+      // Don't keep the MCP server's event loop alive on the backend's account.
+      backendChild.unref();
+    } catch (e) {
+      return { started: false, ok: false, error: String(e && e.message) };
     }
-    backendChild.on("error", function () {});
-  } catch (e) {
-    return { started: false, ok: false, error: String(e && e.message) };
   }
 
   // Poll for readiness (~20s).
