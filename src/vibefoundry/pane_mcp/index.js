@@ -380,6 +380,97 @@ const PROXY_TOOL = {
   },
 };
 
+// The catalogue, exposed to the model. This is the point of the whole feature:
+// when the user asks "show me sales for the last 2 months", the model reads this
+// to work out WHICH dataset holds sales, what one row means, which column is the
+// date, and what the values look like — before pulling anything.
+const CATALOG_TOOL = {
+  name: "vf_catalog",
+  description:
+    "List the catalogued SharePoint datasets available to this project, with a " +
+    "description of each one, what a row represents, its row count, and its " +
+    "columns (with per-column descriptions, distinct values for categoricals and " +
+    "min/max/mean for continuous). Call this FIRST when the user asks a question " +
+    "about their data — it tells you which file to pull and which columns to use. " +
+    "Optionally filter with `query` to match a name, description or column.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "Optional filter, e.g. 'sales' or 'price'. Matches dataset names, " +
+          "descriptions and column names. Omit to list everything.",
+      },
+      dataset: {
+        type: "string",
+        description:
+          "Optional exact dataset name (e.g. 'sales.csv') to get its full column " +
+          "profile instead of the summary listing.",
+      },
+    },
+  },
+};
+
+function matchesQuery(ds, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  var hay = [ds.name, ds.title, ds.summary, ds.grain]
+    .concat((ds.columns || []).map(function (c) { return c.name + " " + (c.description || ""); }))
+    .join(" ")
+    .toLowerCase();
+  return hay.indexOf(q) !== -1;
+}
+
+async function catalogTool(args) {
+  var r = await proxyRequest({ path: "/api/catalog", method: "GET" });
+  if (!r.ok || !r.json) {
+    return { error: "catalogue unavailable (is the backend running?)", status: r.status };
+  }
+  var all = r.json.datasets || [];
+  if (!all.length) {
+    return {
+      datasets: [],
+      hint:
+        "The catalogue is empty. Build it from the Data Catalogue tab in the " +
+        "VibeFoundry pane, or POST /api/catalog/build via vf_request.",
+    };
+  }
+  // Exact dataset requested -> full column detail.
+  if (args && args.dataset) {
+    var hit = all.filter(function (d) { return d.name === args.dataset; })[0];
+    if (!hit) {
+      return { error: "no such dataset", available: all.map(function (d) { return d.name; }) };
+    }
+    return { dataset: hit };
+  }
+  // Otherwise a listing: enough to choose a file, not so much it floods context.
+  var out = all.filter(function (d) { return matchesQuery(d, args && args.query); });
+  return {
+    folder: r.json.folder,
+    built_at: r.json.built_at,
+    datasets: out.map(function (d) {
+      return {
+        name: d.name,
+        title: d.title,
+        summary: d.summary,
+        grain: d.grain,
+        rows: d.rows,
+        n_columns: d.n_columns,
+        size_bytes: d.size_bytes,
+        columns: (d.columns || []).map(function (c) {
+          return { name: c.name, dtype: c.dtype, kind: c.kind, description: c.description };
+        }),
+        error: d.error,
+      };
+    }),
+    hint:
+      "To analyse one of these, pull it into input_folder first: POST " +
+      "/api/sharepoint/download {serverRelativeUrl, destFolder:'input_folder'} " +
+      "via vf_request. Call vf_catalog with `dataset` for full column stats.",
+  };
+}
+
 async function proxyRequest(args) {
   var method = String(args.method || "GET").toUpperCase();
   var path = String(args.path || "/");
@@ -439,7 +530,7 @@ async function handle(msg) {
       return result(id, {});
 
     case "tools/list":
-      return result(id, { tools: [TOOL, PROXY_TOOL] });
+      return result(id, { tools: [TOOL, PROXY_TOOL, CATALOG_TOOL] });
 
     case "tools/call": {
       var name = params.name;
@@ -449,6 +540,22 @@ async function handle(msg) {
         return result(id, {
           content: [{ type: "text", text: "HTTP " + proxied.status }],
           structuredContent: proxied,
+        });
+      }
+
+      if (name === CATALOG_TOOL.name) {
+        // The backend must be up to serve the catalogue; start it if it isn't,
+        // so asking about data works without opening the pane first.
+        await ensureBackend(null);
+        var cat = await catalogTool(params.arguments || {});
+        var summary = cat.error
+          ? "Catalogue error: " + cat.error
+          : cat.dataset
+            ? "Profile for " + cat.dataset.name
+            : (cat.datasets || []).length + " catalogued dataset(s)";
+        return result(id, {
+          content: [{ type: "text", text: summary }],
+          structuredContent: cat,
         });
       }
 

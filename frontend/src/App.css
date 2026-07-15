@@ -4515,3 +4515,83 @@ body {
 .signin-screen .cl-formButtonPrimary:active {
   background: rgba(30, 64, 175, 0.85) !important;
 }
+
+/* ── Data Catalogue tab ─────────────────────────────────────────────────── */
+.dc-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg); }
+
+.dc-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-alt); flex-shrink: 0;
+}
+.dc-folder-input {
+  flex: 1; min-width: 0; padding: 6px 10px; font-size: var(--font-size-sm);
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg); color: var(--color-text);
+}
+.dc-folder-input:focus { outline: none; border-color: var(--color-accent); }
+.dc-built { font-size: var(--font-size-sm); color: var(--color-text-subtle); white-space: nowrap; }
+
+.dc-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 16px 0; padding: 9px 12px; border-radius: 6px;
+  background: var(--color-bg-subtle); border: 1px solid var(--color-border);
+  font-size: var(--font-size-sm); color: var(--color-text-muted);
+}
+.dc-banner-btn { margin-left: auto; }
+.dc-banner-error { border-color: #e5484d; color: #e5484d; }
+
+.dc-list { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+.dc-card {
+  border: 1px solid var(--color-border); border-radius: 8px;
+  background: var(--color-bg-elevated); padding: 14px 16px;
+}
+.dc-card-error { border-color: #e5484d40; }
+.dc-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dc-head-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dc-title { font-size: var(--font-size-base); font-weight: 600; color: var(--color-text); }
+.dc-name { font-family: var(--font-mono, monospace); font-size: var(--font-size-sm); color: var(--color-text-subtle); }
+.dc-summary { margin: 8px 0 0; font-size: var(--font-size-sm); line-height: 1.55; color: var(--color-text-muted); }
+
+.dc-facts {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px;
+  font-size: var(--font-size-sm); color: var(--color-text-subtle);
+}
+.dc-facts strong { color: var(--color-text); font-weight: 600; }
+.dc-grain { flex-basis: 100%; font-style: italic; }
+
+.dc-toggle {
+  margin-top: 10px; padding: 0; border: none; background: none; cursor: pointer;
+  font-size: var(--font-size-sm); color: var(--color-accent); font-family: inherit;
+}
+.dc-toggle:hover { text-decoration: underline; }
+
+.dc-table-wrap { margin-top: 10px; overflow-x: auto; }
+.dc-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-sm); }
+.dc-table th {
+  text-align: left; padding: 6px 10px; font-weight: 600; white-space: nowrap;
+  color: var(--color-text-subtle); border-bottom: 1px solid var(--color-border);
+}
+.dc-table td { padding: 6px 10px; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.dc-col-name { font-family: var(--font-mono, monospace); white-space: nowrap; color: var(--color-text); }
+.dc-col-desc { color: var(--color-text-muted); min-width: 220px; }
+.dc-col-stat { color: var(--color-text-subtle); font-size: 12px; }
+
+.dc-kind {
+  display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+  background: var(--color-bg-subtle); color: var(--color-text-subtle); white-space: nowrap;
+}
+.dc-kind-temporal { background: #2563eb1a; color: #2563eb; }
+.dc-kind-continuous { background: #16a34a1a; color: #16a34a; }
+
+.dc-muted { color: var(--color-text-subtle); }
+.dc-truncated { margin: 8px 0 0; font-size: var(--font-size-sm); }
+.dc-error { margin-top: 8px; font-size: var(--font-size-sm); color: #e5484d; }
+.dc-empty { padding: 40px 20px; text-align: center; max-width: 520px; margin: 0 auto; }
+.dc-empty-title { margin: 0 0 6px; font-size: var(--font-size-base); font-weight: 600; color: var(--color-text); }
+.dc-empty code {
+  font-family: var(--font-mono, monospace); font-size: 12px;
+  background: var(--color-bg-subtle); padding: 1px 5px; border-radius: 4px;
+}

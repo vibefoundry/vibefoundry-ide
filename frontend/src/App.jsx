@@ -4,6 +4,7 @@ import FileViewer from './components/FileViewer'
 import ScriptRunner from './components/ScriptRunner'
 import FolderPicker from './components/FolderPicker'
 import SharePointBrowser from './components/SharePointBrowser'
+import DataCatalogue from './components/DataCatalogue'
 import TemplatePickerModal from './components/TemplatePickerModal'
 import {
   getFileType,
@@ -104,7 +105,10 @@ function App() {
   const [catalog, setCatalog] = useState(null)
   const [catalogError, setCatalogError] = useState(null)
   const [loadingCatalog, setLoadingCatalog] = useState(false)
-  const [showPreview, setShowPreview] = useState(false)
+  // Which main view is showing: 'files' | 'preview' | 'catalog'. Was a boolean
+  // (showPreview) until the Data Catalogue made it a third option.
+  const [view, setView] = useState('files')
+  const showPreview = view === 'preview'
   const [previewUrl, setPreviewUrl] = useState(() => localStorage.getItem('previewUrl') || '')
   const [deletedFileToast, setDeletedFileToast] = useState(null)
   const [showFolderPicker, setShowFolderPicker] = useState(true)
@@ -895,9 +899,6 @@ function App() {
             <button className="btn-flat" onClick={() => setShowBuildModal(true)}>
               Build
             </button>
-            <button className="btn-flat" onClick={() => setShowSharePoint(true)}>
-              SharePoint
-            </button>
             <div className="templates-menu-wrap" ref={templatesMenuRef}>
               <button
                 className="btn-flat"
@@ -937,16 +938,22 @@ function App() {
           <div className="top-bar-section top-bar-center">
             <div className="view-tabs">
               <button
-                className={`view-tab ${!showPreview ? 'active' : ''}`}
-                onClick={() => setShowPreview(false)}
+                className={`view-tab ${view === 'files' ? 'active' : ''}`}
+                onClick={() => setView('files')}
               >
                 Files
               </button>
               <button
-                className={`view-tab ${showPreview ? 'active' : ''}`}
-                onClick={() => setShowPreview(true)}
+                className={`view-tab ${view === 'preview' ? 'active' : ''}`}
+                onClick={() => setView('preview')}
               >
                 Preview
+              </button>
+              <button
+                className={`view-tab ${view === 'catalog' ? 'active' : ''}`}
+                onClick={() => setView('catalog')}
+              >
+                Data Catalogue
               </button>
             </div>
           </div>
@@ -1063,7 +1070,17 @@ function App() {
             </div>
           )}
 
-          {showPreview ? (
+          {view === 'catalog' ? (
+            <DataCatalogue
+              onConnect={() => setShowSharePoint(true)}
+              onPulled={async () => {
+                try {
+                  const res = await fetch('/api/files/tree')
+                  if (res.ok) { const data = await res.json(); setTree([data.tree]) }
+                } catch { /* tree refresh is best-effort */ }
+              }}
+            />
+          ) : showPreview ? (
             <div className="preview-pane">
               <div className="preview-url-bar">
                 <input

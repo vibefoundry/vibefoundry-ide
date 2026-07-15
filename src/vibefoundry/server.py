@@ -2467,6 +2467,100 @@ async def sharepoint_signout():
     return {"connected": False}
 
 
+# ============================================================================
+# Data Catalogue — profiles the SharePoint library and describes each dataset
+# ----------------------------------------------------------------------------
+# Profiling happens here (the delegated token never leaves this machine); prose
+# comes from the Azure describer, which holds the OpenAI key and never sees
+# SharePoint. Results are cached in ~/.vibefoundry/catalog.json keyed on a
+# size+modified fingerprint, so it is a one-time cost per upload.
+# ============================================================================
+from vibefoundry import catalog as _cat
+
+
+@app.get("/api/catalog")
+async def catalog_get(folder: str = ""):
+    """Return the cached catalogue. Never builds — build is explicit."""
+    cat = _cat.read_catalog()
+    svc = _cat.service_config()
+    return {
+        "folder": cat.get("folder"),
+        "built_at": cat.get("built_at"),
+        "datasets": list(cat.get("datasets", {}).values()),
+        "serviceConfigured": bool(svc.get("url")),
+    }
+
+
+class CatalogBuildRequest(BaseModel):
+    folder: str = ""     # server-relative SharePoint folder; defaults to the library root
+    refresh: bool = False  # re-describe even if the fingerprint is unchanged
+
+
+@app.post("/api/catalog/build")
+async def catalog_build(request: CatalogBuildRequest):
+    cfg = _sp_read()
+    host, site = cfg.get("host"), cfg.get("site")
+    if not host or not site:
+        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+    if not _cat.service_config().get("url"):
+        raise HTTPException(
+            status_code=400,
+            detail="Catalogue service not configured (~/.vibefoundry/catalog_service.json)",
+        )
+    token = await _sp_access_token()
+
+    rel = request.folder.strip() or f"{site}/Shared Documents"
+    encoded = _sp_quote(rel.replace("'", "''"), safe="/")
+    base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
+
+    async with httpx.AsyncClient(timeout=600) as client:
+        resp = await client.get(f"{base}/Files", headers=headers)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=f"SharePoint list failed: {resp.text[:200]}")
+
+        files = [
+            {
+                "name": x.get("Name"),
+                "serverRelativeUrl": x.get("ServerRelativeUrl"),
+                "size": x.get("Length"),
+                "modified": x.get("TimeLastModified"),
+            }
+            for x in resp.json().get("value", [])
+            if Path(x.get("Name", "")).suffix.lower() in _cat.DATA_SUFFIXES
+        ]
+
+        existing = _cat.read_catalog()
+        cached = existing.get("datasets", {}) if existing.get("folder") == rel else {}
+        names = [f["name"] for f in files]
+        out: dict = {}
+
+        for f in files:
+            fp = _cat.fingerprint(f)
+            prev = cached.get(f["name"])
+            if prev and prev.get("fingerprint") == fp and not request.refresh and not prev.get("error"):
+                out[f["name"]] = prev          # unchanged since last build
+                continue
+            try:
+                profile = await _cat.fetch_and_profile(client, host, site, token, f)
+                described = await _cat.describe(client, profile, names)
+                out[f["name"]] = _cat.merge_entry(profile, described, fp)
+            except Exception as e:
+                out[f["name"]] = {
+                    "fingerprint": fp, "name": f["name"], "size_bytes": f.get("size"),
+                    "error": f"{type(e).__name__}: {e}", "columns": [],
+                }
+
+    data = {"folder": rel, "built_at": int(time.time()), "datasets": out}
+    _cat.write_catalog(data)
+    return {
+        "folder": rel,
+        "built_at": data["built_at"],
+        "datasets": list(out.values()),
+        "serviceConfigured": True,
+    }
+
+
 # DataFrame streaming endpoints
 
 class DataFrameQueryRequest(BaseModel):
