@@ -8,6 +8,8 @@ import json
 import math
 import asyncio
 import base64
+import importlib
+import importlib.metadata as importlib_metadata
 import secrets
 import struct
 import shutil
@@ -416,10 +418,48 @@ def get_static_dir() -> Path:
 
 # API Routes
 
+# The version this process actually loaded, captured once at import. Routes are
+# fixed in memory at startup, but static/ is read from disk per request — so a
+# `pip install -U` under a running backend serves the NEW frontend against the
+# OLD API, and a new tab calls a route that doesn't exist yet. That reads as a
+# bare 404 with no clue why. Comparing this against the on-disk distribution lets
+# us say "restart me" instead.
+# Read directly rather than importing vibefoundry.__version__ — that would pull
+# the package __init__ (which imports cli) back into server and risk a cycle.
+try:
+    _LOADED_VERSION = importlib_metadata.version("vibefoundry")
+except Exception:
+    _LOADED_VERSION = "0.0.0+dev"
+
+_installed_cache = {"value": _LOADED_VERSION, "at": 0.0}
+
+
+def installed_version() -> str:
+    """Version currently on disk — may differ from the one we're running."""
+    now = time.time()
+    if now - _installed_cache["at"] < 15:  # health gets polled; don't stat constantly
+        return _installed_cache["value"]
+    try:
+        importlib.invalidate_caches()
+        _installed_cache["value"] = importlib_metadata.version("vibefoundry")
+    except Exception:
+        _installed_cache["value"] = _LOADED_VERSION
+    _installed_cache["at"] = now
+    return _installed_cache["value"]
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "project_folder": str(state.project_folder) if state.project_folder else None}
+    on_disk = installed_version()
+    return {
+        "status": "ok",
+        "project_folder": str(state.project_folder) if state.project_folder else None,
+        "version": _LOADED_VERSION,
+        "installedVersion": on_disk,
+        # True => this process is running code older than what's installed.
+        "stale": on_disk != _LOADED_VERSION,
+    }
 
 
 class LaunchTerminalRequest(BaseModel):
@@ -2487,6 +2527,7 @@ async def catalog_get(folder: str = ""):
         "folder": cat.get("folder"),
         "built_at": cat.get("built_at"),
         "datasets": list(cat.get("datasets", {}).values()),
+        "truncated": cat.get("truncated", False),
         "serviceConfigured": bool(svc.get("url")),
     }
 
@@ -2509,26 +2550,23 @@ async def catalog_build(request: CatalogBuildRequest):
         )
     token = await _sp_access_token()
 
-    rel = request.folder.strip() or f"{site}/Shared Documents"
-    encoded = _sp_quote(rel.replace("'", "''"), safe="/")
-    base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
+    rel = (request.folder.strip() or f"{site}/Shared Documents").rstrip("/")
 
     async with httpx.AsyncClient(timeout=600) as client:
-        resp = await client.get(f"{base}/Files", headers=headers)
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=f"SharePoint list failed: {resp.text[:200]}")
+        try:
+            files, truncated = await _cat.list_datasets(client, host, site, token, rel)
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e))
 
-        files = [
-            {
-                "name": x.get("Name"),
-                "serverRelativeUrl": x.get("ServerRelativeUrl"),
-                "size": x.get("Length"),
-                "modified": x.get("TimeLastModified"),
-            }
-            for x in resp.json().get("value", [])
-            if Path(x.get("Name", "")).suffix.lower() in _cat.DATA_SUFFIXES
-        ]
+        if not files:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No data files ({', '.join(sorted(_cat.DATA_SUFFIXES))}) found in "
+                    f"'{rel}' or its subfolders. Check the path — a document library "
+                    f"root often holds only folders."
+                ),
+            )
 
         existing = _cat.read_catalog()
         cached = existing.get("datasets", {}) if existing.get("folder") == rel else {}
@@ -2536,27 +2574,32 @@ async def catalog_build(request: CatalogBuildRequest):
         out: dict = {}
 
         for f in files:
+            # Key on path, not name: two folders can each hold a sales.csv.
+            key = f.get("path") or f["name"]
             fp = _cat.fingerprint(f)
-            prev = cached.get(f["name"])
+            prev = cached.get(key)
             if prev and prev.get("fingerprint") == fp and not request.refresh and not prev.get("error"):
-                out[f["name"]] = prev          # unchanged since last build
+                out[key] = prev          # unchanged since last build
                 continue
             try:
                 profile = await _cat.fetch_and_profile(client, host, site, token, f)
+                profile["path"] = f.get("path")
                 described = await _cat.describe(client, profile, names)
-                out[f["name"]] = _cat.merge_entry(profile, described, fp)
+                out[key] = _cat.merge_entry(profile, described, fp)
             except Exception as e:
-                out[f["name"]] = {
-                    "fingerprint": fp, "name": f["name"], "size_bytes": f.get("size"),
+                out[key] = {
+                    "fingerprint": fp, "name": f["name"], "path": f.get("path"),
+                    "size_bytes": f.get("size"),
                     "error": f"{type(e).__name__}: {e}", "columns": [],
                 }
 
-    data = {"folder": rel, "built_at": int(time.time()), "datasets": out}
+    data = {"folder": rel, "built_at": int(time.time()), "datasets": out, "truncated": truncated}
     _cat.write_catalog(data)
     return {
         "folder": rel,
         "built_at": data["built_at"],
         "datasets": list(out.values()),
+        "truncated": truncated,
         "serviceConfigured": True,
     }
 

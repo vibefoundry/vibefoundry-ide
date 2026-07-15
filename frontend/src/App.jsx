@@ -119,6 +119,35 @@ function App() {
   const [showNewFolderModal, setShowNewFolderModal] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [creatingFolder, setCreatingFolder] = useState(false)
+  // Set when the backend process is running older code than what's installed —
+  // `pip install -U` swaps static/ under a live server, so the new frontend ends
+  // up calling routes the old process never registered. Without this it surfaces
+  // as an unexplained 404.
+  const [staleBackend, setStaleBackend] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      try {
+        const res = await fetch('/api/health')
+        if (!res.ok) return
+        const h = await res.json()
+        if (cancelled) return
+        // No `version` field at all means the backend predates this check — i.e.
+        // it's definitely older than the frontend asking. That's the case that
+        // matters most: a process too old to report staleness can't self-report,
+        // so its silence is the signal.
+        if (!('version' in h)) {
+          setStaleBackend({ version: 'an older version', installedVersion: null })
+        } else if (h.stale) {
+          setStaleBackend(h)
+        }
+      } catch { /* health is best-effort */ }
+    }
+    check()
+    const t = setInterval(check, 30000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [])
 
   const mainContentRef = useRef(null)
   const pollIntervalRef = useRef(null)
@@ -890,6 +919,14 @@ function App() {
     <div className={`app ${isResizing ? 'resizing' : ''}`}>
       {activeResizeCursor && (
         <div className="resize-capture-overlay" style={{ cursor: activeResizeCursor }} />
+      )}
+      {staleBackend && (
+        <div className="stale-banner">
+          {staleBackend.installedVersion
+            ? `VibeFoundry ${staleBackend.installedVersion} is installed, but this window is still running ${staleBackend.version}.`
+            : 'This window is running an older VibeFoundry than the one installed.'}
+          {' '}Quit and relaunch to load it — until then newer features will fail.
+        </div>
       )}
       {/* Unified Top Bar */}
       {canWrite && tree.length > 0 && (

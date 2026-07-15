@@ -59,7 +59,9 @@ const DatasetCard = ({ ds, onPull, pulling }) => {
       <div className="dc-card-head">
         <div className="dc-head-left">
           <span className="dc-title">{ds.title || ds.name}</span>
-          <span className="dc-name">{ds.name}</span>
+          {/* Show the subfolder path when there is one — with the walk, two
+              folders can each hold a sales.csv. */}
+          <span className="dc-name">{ds.path || ds.name}</span>
         </div>
         <div className="dc-head-right">
           <button
@@ -152,8 +154,9 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
   }
 
   const pull = async (ds) => {
-    const entry = (cat?.datasets || []).find((d) => d.name === ds.name)
-    const sru = `${cat.folder}/${ds.name}`
+    // ds.path is relative to the catalogued root and may include subfolders;
+    // fall back to the bare name for catalogues built before paths existed.
+    const sru = `${cat.folder}/${ds.path || ds.name}`
     setPullingName(ds.name)
     try {
       const res = await fetch('/api/sharepoint/download', {
@@ -204,6 +207,12 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
       {cat && cat.serviceConfigured === false && (
         <div className="dc-banner">
           The describer isn’t configured, so datasets will be profiled but not described.
+        </div>
+      )}
+      {cat?.truncated && (
+        <div className="dc-banner">
+          Stopped after the first 100 datasets — this folder has more. Point at a
+          narrower subfolder to catalogue the rest.
         </div>
       )}
       {building && (

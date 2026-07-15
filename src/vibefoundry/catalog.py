@@ -36,6 +36,69 @@ CATEGORICAL_MAX_UNIQUE = 20
 
 DATA_SUFFIXES = {".csv", ".tsv", ".parquet", ".xlsx", ".xls", ".json"}
 
+# A library root usually holds folders, not files — pointing the catalogue at it
+# and finding nothing looks broken. Walk down instead, but bounded: a catalogue
+# that quietly turns into a download queue over someone's whole SharePoint is
+# worse than one that says it stopped.
+MAX_WALK_DEPTH = 3
+MAX_DATASETS = 100
+
+
+async def list_datasets(
+    client: httpx.AsyncClient, host: str, site: str, token: str, root: str
+) -> tuple[list[dict], bool]:
+    """Find data files under `root`, descending into subfolders.
+
+    Returns (datasets, truncated). `truncated` is True if we hit a limit and
+    stopped — the caller should say so rather than imply full coverage.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
+    found: list[dict] = []
+    queue: list[tuple[str, int]] = [(root, 0)]
+    truncated = False
+
+    while queue:
+        folder, depth = queue.pop(0)
+        encoded = quote(folder.replace("'", "''"), safe="/")
+        base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
+
+        resp = await client.get(f"{base}/Files", headers=headers)
+        if resp.status_code != 200:
+            # A folder we can't read shouldn't sink the whole catalogue.
+            if folder == root:
+                raise RuntimeError(f"SharePoint list failed ({resp.status_code}): {resp.text[:200]}")
+            continue
+
+        for x in resp.json().get("value", []):
+            name = x.get("Name", "")
+            if Path(name).suffix.lower() not in DATA_SUFFIXES:
+                continue
+            if len(found) >= MAX_DATASETS:
+                truncated = True
+                break
+            found.append({
+                "name": name,
+                "serverRelativeUrl": x.get("ServerRelativeUrl"),
+                "size": x.get("Length"),
+                "modified": x.get("TimeLastModified"),
+                # Relative to the root the user pointed at, so two files with the
+                # same name in different folders stay distinguishable.
+                "path": (x.get("ServerRelativeUrl") or "").replace(root + "/", ""),
+            })
+        if truncated:
+            break
+
+        if depth < MAX_WALK_DEPTH:
+            d = await client.get(f"{base}/Folders", headers=headers)
+            if d.status_code == 200:
+                for f in d.json().get("value", []):
+                    fname = f.get("Name")
+                    if not fname or fname == "Forms" or fname.startswith("_"):
+                        continue
+                    queue.append((f.get("ServerRelativeUrl"), depth + 1))
+
+    return found, truncated
+
 
 def config_path() -> Path:
     home = Path.home() / ".vibefoundry"
@@ -190,6 +253,9 @@ def merge_entry(profile: dict, described: dict, fp: str) -> dict:
     return {
         "fingerprint": fp,
         "name": profile["name"],
+        # Relative to the catalogued root. Pull rebuilds the SharePoint URL from
+        # this, so dropping it breaks every dataset in a subfolder.
+        "path": profile.get("path") or profile["name"],
         "size_bytes": profile["size_bytes"],
         "rows": profile["rows"],
         "n_columns": profile["n_columns"],

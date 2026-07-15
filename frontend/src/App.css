@@ -4595,3 +4595,14 @@ body {
   font-family: var(--font-mono, monospace); font-size: 12px;
   background: var(--color-bg-subtle); padding: 1px 5px; border-radius: 4px;
 }
+
+/* Shown when the running backend is older than the installed package. */
+.stale-banner {
+  padding: 8px 16px;
+  background: #fef3c7;
+  color: #92400e;
+  border-bottom: 1px solid #fde68a;
+  font-size: var(--font-size-sm);
+  text-align: center;
+  flex-shrink: 0;
+}
