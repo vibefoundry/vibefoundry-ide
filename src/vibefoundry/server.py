@@ -459,6 +459,9 @@ async def health_check():
         "installedVersion": on_disk,
         # True => this process is running code older than what's installed.
         "stale": on_disk != _LOADED_VERSION,
+        # So `vibefoundry --kill` can stop strays, and the pane MCP can tell our
+        # backend apart from one someone started in a terminal.
+        "pid": os.getpid(),
     }
 
 

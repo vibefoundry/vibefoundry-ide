@@ -22,10 +22,25 @@
 const WIDGET_URI = "ui://widget/vibefoundry.html";
 const WIDGET_MIME = "text/html+skybridge";
 
-// Where the real VibeFoundry FastAPI backend is expected to run locally.
-// Override with the VF_BACKEND env var in the MCP config if you use another port.
-const BACKEND = process.env.VF_BACKEND || "http://127.0.0.1:8765";
-const BACKEND_WS = BACKEND.replace(/^http/, "ws");
+// Where the real VibeFoundry FastAPI backend runs.
+//
+// NOT a fixed port. It used to be pinned to 8765, which meant: if anything else
+// already held 8765 (a `vibefoundry` in a terminal, a leftover from a previous
+// session), we passed --port 8765 anyway — and an explicit --port skips the
+// CLI's find_available_port(), so there was no fallback. The spawn could never
+// bind, while the health check happily passed against the *other* process. The
+// pane then silently drove someone else's backend, rooted at whatever project
+// THAT was opened with (a `vibefoundry` launched from ~ roots at the whole home
+// directory, which is why the pane crawled).
+//
+// Now: adopt an existing backend only if it's serving the project we want, else
+// pick a genuinely free port and remember it. VF_BACKEND still pins it if set.
+const BACKEND_FIXED = process.env.VF_BACKEND || null;
+let BACKEND = BACKEND_FIXED || "http://127.0.0.1:8765";
+
+// Ports we're willing to run on. Matches the CLI's own search from 8765 up.
+const PORT_MIN = 8765;
+const PORT_MAX = 8799;
 
 // Link the tool to its widget template. We set BOTH known conventions so that
 // whichever one this desktop-app build honors will match; extra keys are
@@ -59,10 +74,70 @@ function loadPaneHtml() {
   }
 }
 
-const BACKEND_PORT = (BACKEND.match(/:(\d+)/) || [])[1] || "8765";
-const BACKEND_CMD =
-  process.env.VF_BACKEND_CMD ||
-  "vibefoundry --port " + BACKEND_PORT + " --no-browser";
+function backendPort() {
+  return (BACKEND.match(/:(\d+)/) || [])[1] || "8765";
+}
+function backendCmd() {
+  return (
+    process.env.VF_BACKEND_CMD ||
+    "vibefoundry --port " + backendPort() + " --no-browser"
+  );
+}
+
+// --- Port discovery ------------------------------------------------------------
+const net = require("net");
+
+// Free means "we can actually bind it", not "nothing answered a health check" —
+// a port can be held by something that isn't ours and doesn't speak HTTP.
+function isPortFree(port) {
+  return new Promise(function (resolve) {
+    var srv = net.createServer();
+    srv.once("error", function () { resolve(false); });
+    srv.once("listening", function () { srv.close(function () { resolve(true); }); });
+    srv.listen(port, "127.0.0.1");
+  });
+}
+
+async function findFreePort() {
+  for (var p = PORT_MIN; p <= PORT_MAX; p++) {
+    if (await isPortFree(p)) return p;
+  }
+  return null;
+}
+
+function healthAt(port, timeoutMs) {
+  var ctrl = new AbortController();
+  var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 700);
+  return fetch("http://127.0.0.1:" + port + "/api/health", { signal: ctrl.signal })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; })
+    .then(function (j) { clearTimeout(t); return j; });
+}
+
+// Compare real paths, not strings. The backend reports its folder resolved, so
+// on macOS "/tmp/x" comes back as "/private/tmp/x" — a string compare would call
+// the same project a different one and spawn a redundant backend every launch.
+function samePath(a, b) {
+  if (!a || !b) return false;
+  var real = function (s) {
+    try { return fs.realpathSync(String(s)).replace(/\/+$/, ""); }
+    catch (e) { return String(s).replace(/\/+$/, ""); }  // may not exist yet
+  };
+  return real(a) === real(b);
+}
+
+// Find a RUNNING backend we're willing to use. "Willing" is the point: adopting
+// anything that answers is how the pane ended up driving a home-directory-rooted
+// server. If a project was requested, the backend must actually be serving it.
+async function findUsableBackend(project) {
+  for (var p = PORT_MIN; p <= PORT_MAX; p++) {
+    var h = await healthAt(p, 400);
+    if (!h || h.status !== "ok") continue;
+    if (!project) return p;                       // no preference — any will do
+    if (samePath(h.project_folder, project)) return p;
+  }
+  return null;
+}
 
 let backendChild = null;
 
@@ -125,12 +200,32 @@ function resolveBundledPython() {
 }
 
 async function ensureBackend(project) {
-  if (await healthCheck(800)) return { started: false, ok: true };
+  // 1. Our own child, still up and serving what we asked for? Reuse it.
+  if (backendAlive() && (await healthCheck(800))) {
+    return { started: false, ok: true, port: backendPort() };
+  }
 
-  // Never stack a second backend on the same port. We pass an explicit --port,
-  // so there is no free-port fallback: the loser can't bind and lingers as a
-  // dead process holding nothing. If a prior call is still booting one, wait.
+  // 2. Someone else's backend — adopt ONLY if it's serving this project. A
+  //    `vibefoundry` running in a terminal (rooted at ~, indexing the whole home
+  //    directory) must not get silently adopted just because it answers.
+  if (BACKEND_FIXED) {
+    if (await healthCheck(800)) return { started: false, ok: true, port: backendPort() };
+  } else {
+    var existing = await findUsableBackend(project);
+    if (existing !== null) {
+      BACKEND = "http://127.0.0.1:" + existing;
+      return { started: false, ok: true, port: String(existing), adopted: true };
+    }
+  }
+
+  // 3. Nothing usable — start our own on a port that's genuinely free. Pinning
+  //    8765 meant colliding with whatever already held it and never binding.
   if (!backendAlive()) {
+    var port = BACKEND_FIXED ? backendPort() : await findFreePort();
+    if (!port) {
+      return { started: false, ok: false, error: "no free port in " + PORT_MIN + "-" + PORT_MAX };
+    }
+    if (!BACKEND_FIXED) BACKEND = "http://127.0.0.1:" + port;
     try {
       // detached: own process group, so killBackend can signal the whole tree.
       var opts = {
@@ -142,12 +237,12 @@ async function ensureBackend(project) {
       var py = resolveBundledPython();
       if (py) {
         // Preferred: run the exact interpreter that has vibefoundry installed.
-        var args = ["-m", "vibefoundry", "--port", String(BACKEND_PORT), "--no-browser"];
+        var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser"];
         if (project) args.push(project);
         backendChild = spawn(py, args, opts);
       } else {
         // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
-        var cmd = BACKEND_CMD;
+        var cmd = backendCmd();
         if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
         if (process.platform === "win32") {
           backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], opts);
@@ -167,9 +262,9 @@ async function ensureBackend(project) {
   // Poll for readiness (~20s).
   for (var i = 0; i < 40; i++) {
     await sleep(500);
-    if (await healthCheck(800)) return { started: true, ok: true };
+    if (await healthCheck(800)) return { started: true, ok: true, port: backendPort() };
   }
-  return { started: true, ok: false };
+  return { started: true, ok: false, port: backendPort() };
 }
 
 // --- The widget (self-contained, no external assets → no CSP surprises) --------

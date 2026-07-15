@@ -9,6 +9,7 @@ import socket
 import sys
 import threading
 import time
+import json
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -30,6 +31,88 @@ def find_available_port(start_port: int = 8765, max_attempts: int = 100) -> int:
             except OSError:
                 continue
     raise RuntimeError(f"Could not find available port in range {start_port}-{start_port + max_attempts}")
+
+
+def find_running_backends(start: int = 8765, end: int = 8799) -> list[dict]:
+    """Probe the local port range for VibeFoundry backends.
+
+    Identifies them by /api/health rather than by process name, so it only ever
+    reports (and --kill only ever stops) something that really is one of ours.
+    The pid comes from the health payload; older backends predate it and report
+    None, in which case we can list but not stop them.
+
+    The timeout is deliberately generous: a backend rooted at a huge folder (a
+    `vibefoundry` launched from $HOME indexes everything) can take over a second
+    to answer, and a tight timeout made --list miss exactly the overloaded strays
+    you're trying to find.
+    """
+    found = []
+    for port in range(start, end + 1):
+        if not _port_open(port):
+            continue  # nothing here at all — skip the expensive probe
+
+        data = None
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1.5) as r:
+                if r.status == 200:
+                    data = json.loads(r.read().decode())
+        except Exception:
+            data = None  # open but not answering — see below
+
+        pid = _pid_on_port(port)
+        if data is None:
+            # The port is held but health didn't answer. Don't skip it: a backend
+            # wedged by a huge project folder (e.g. launched from $HOME) is
+            # exactly the one worth killing, and identifying strays by health
+            # alone goes blind precisely when they're broken. Only claim it if a
+            # process actually holds the port.
+            if pid is None:
+                continue
+            found.append({
+                "port": port, "pid": pid, "version": None,
+                "project_folder": None, "unresponsive": True,
+            })
+            continue
+
+        if data.get("status") != "ok":
+            continue  # something else is listening here
+        found.append({
+            "port": port,
+            "pid": data.get("pid") or pid,
+            "version": data.get("version"),
+            "project_folder": data.get("project_folder"),
+            "unresponsive": False,
+        })
+    return found
+
+
+def _port_open(port: int) -> bool:
+    """Is anything listening? Cheap, and never blocks on a wedged server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.2)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _pid_on_port(port: int) -> Optional[int]:
+    """Who holds this port? Used when health can't answer for itself."""
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, timeout=5
+            ).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
+                    return int(parts[4])
+            return None
+        out = subprocess.run(
+            ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip()
+        return int(out.split("\n")[0]) if out else None
+    except Exception:
+        return None
 
 
 def run_server(port: int, host: str = "127.0.0.1"):
@@ -82,8 +165,53 @@ def main(args: Optional[list[str]] = None):
         action="store_true",
         help="Run in development mode (enables CORS, detailed logging)"
     )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List VibeFoundry backends currently running on this machine"
+    )
+    parser.add_argument(
+        "--kill",
+        action="store_true",
+        help="Stop every running VibeFoundry backend (frees their ports)"
+    )
 
     parsed_args = parser.parse_args(args)
+
+    if parsed_args.list or parsed_args.kill:
+        found = find_running_backends()
+        if not found:
+            print("No VibeFoundry backends are running.")
+            return
+        for b in found:
+            if b.get("unresponsive"):
+                print(f"  port {b['port']}  pid {b['pid'] or '?'}  NOT RESPONDING "
+                      f"(wedged — often a huge project folder, e.g. launched from your home directory)")
+            else:
+                print(f"  port {b['port']}  pid {b['pid'] or '?'}  v{b['version'] or '?'}  "
+                      f"{b['project_folder'] or '(no folder)'}")
+        if parsed_args.kill:
+            killed = 0
+            skipped = []
+            for b in found:
+                if not b["pid"]:
+                    # Pre-0.2.32 backends don't report a pid. Say so rather than
+                    # quietly leaving them running and claiming success.
+                    skipped.append(b)
+                    continue
+                try:
+                    os.kill(b["pid"], signal.SIGTERM)
+                    killed += 1
+                except OSError as e:
+                    print(f"  could not stop pid {b['pid']}: {e}")
+            print(f"Stopped {killed} backend(s).")
+            for b in skipped:
+                print(
+                    f"  NOT stopped: port {b['port']} ({b['project_folder']}) — it predates "
+                    f"--kill and doesn't report its pid. Close its window, or: "
+                    f"lsof -ti tcp:{b['port']} | xargs kill"
+                )
+        return
 
     # Handle project folder - use current directory if not specified
     if parsed_args.folder:
