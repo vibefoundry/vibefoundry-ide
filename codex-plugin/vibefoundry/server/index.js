@@ -52,6 +52,39 @@ const TOOL_META = {
 
 const SERVER_INFO = { name: "vibefoundry", version: "0.0.1" };
 
+// Returned from initialize, so it frames the WHOLE session rather than one turn.
+// MCP has no notion of a mode: the model re-decides which tools to call every
+// turn and nothing a server returns can capture later prompts. Instructions are
+// the strongest honest lever we have — they persist for the session and steer
+// without pretending to control.
+const SESSION_INSTRUCTIONS = [
+  "VibeFoundry is a local data-science IDE. When it is open, the user's data and",
+  "code live in a project folder on their machine, and this server is how you",
+  "reach both. Prefer these tools over guessing, and never answer a question",
+  "about the user's data from memory or assumption.",
+  "",
+  "Project layout (see the project's AGENTS.md, which is authoritative):",
+  "  input_folder/          source data — SACRED, never edit or overwrite",
+  "  output_folder/{task}/  where results are written",
+  "  app_folder/scripts/{app}/  ALL code lives here, one folder per app",
+  "  app_folder/meta_data/  generated descriptions of the available data",
+  "",
+  "How to work with the data:",
+  "  - vf_catalog FIRST for any question about what data exists or what's in it.",
+  "    It returns each dataset's description, what one row represents (the grain),",
+  "    row counts, and per-column profiles — distinct values for categoricals,",
+  "    min/max/mean for continuous, real date ranges for temporal columns. That",
+  "    is how you pick the right file and the right columns before reading a byte.",
+  "  - vf_catalog with `dataset` gives the full column profile for one dataset.",
+  "  - The catalogue covers the connected SharePoint library. To analyse one of",
+  "    those datasets, pull it into input_folder first (see the tool's hint).",
+  "  - vf_request reaches any backend endpoint (files, previews, running scripts)",
+  "    when no dedicated tool fits.",
+  "",
+  "If the catalogue is empty, say so and point the user at the Data Catalogue tab",
+  "rather than guessing at their data.",
+].join("\n");
+
 // --- Backend supervision -------------------------------------------------------
 // The MCP server auto-starts the VibeFoundry FastAPI backend so the user never
 // has to. Command is configurable via VF_BACKEND_CMD; the default assumes the
@@ -618,6 +651,7 @@ async function handle(msg) {
         protocolVersion: params.protocolVersion || "2025-06-18",
         capabilities: { tools: {}, resources: {} },
         serverInfo: SERVER_INFO,
+        instructions: SESSION_INSTRUCTIONS,
       });
 
     case "notifications/initialized":
@@ -670,14 +704,57 @@ async function handle(msg) {
           (backend.error ? " (" + backend.error + ")" : "") +
           " — set VF_BACKEND_CMD to the correct launch command.";
       if (project) message += " Project: " + project;
+
+      // Launching is the moment to frame the rest of the conversation. The model
+      // reads this reply, so it's where "from here on, work through VibeFoundry"
+      // actually lands — initialize's instructions can be far up the context by
+      // now. Still steering, not enforcement: the model chooses each turn.
+      var folder = null;
+      try {
+        var info = await (await fetch(BACKEND + "/api/health")).json();
+        folder = info && info.project_folder;
+      } catch (e) { /* backend may still be waking */ }
+
+      var catalogued = 0;
+      try {
+        var cat = await (await fetch(BACKEND + "/api/catalog")).json();
+        catalogued = ((cat && cat.datasets) || []).length;
+      } catch (e) { /* no catalogue yet */ }
+
+      var brief = backend.ok
+        ? [
+            message,
+            "",
+            "VibeFoundry is now the user's working environment for this",
+            "conversation. Treat their data and code as living here, and work",
+            "through this server rather than assuming or improvising:",
+            "",
+            folder ? "  Project folder: " + folder : "  No project folder selected yet.",
+            "  Data in:  input_folder/ (never edit it)  ->  results to output_folder/{task}/",
+            "  Code in:  app_folder/scripts/{app}/  (all of it, one folder per app)",
+            catalogued
+              ? "  Catalogue: " + catalogued + " dataset(s) described and ready — call vf_catalog"
+              : "  Catalogue: empty. Build it from the Data Catalogue tab before answering data questions.",
+            "",
+            "For ANY question about their data — what exists, what's in it, which",
+            "file to use — call vf_catalog FIRST. It gives you each dataset's",
+            "purpose, what one row means, and its column profiles. Do not guess at",
+            "filenames, columns or contents, and do not answer from memory. Use",
+            "vf_request for backend endpoints with no dedicated tool. Follow the",
+            "project's AGENTS.md for how to structure anything you build.",
+          ].join("\n")
+        : message;
+
       return result(id, {
-        content: [{ type: "text", text: message }],
+        content: [{ type: "text", text: brief }],
         structuredContent: {
           status: backend.ok ? "ok" : "backend_down",
           message: message,
           backendUrl: BACKEND,
           backendReady: backend.ok,
           project: project,
+          projectFolder: folder,
+          cataloguedDatasets: catalogued,
         },
         _meta: TOOL_META,
       });
