@@ -77,6 +77,9 @@ function loadPaneHtml() {
 function backendPort() {
   return (BACKEND.match(/:(\d+)/) || [])[1] || "8765";
 }
+function backendWs() {
+  return BACKEND.replace(/^http/, "ws");
+}
 function backendCmd() {
   return (
     process.env.VF_BACKEND_CMD ||
@@ -713,7 +716,12 @@ async function handle(msg) {
               // host honors this, localhost fetch/ws is permitted.
               ui: {
                 csp: {
-                  connectDomains: [BACKEND, BACKEND_WS],
+                  // Derived at use time, not cached: BACKEND is chosen when the
+                  // backend starts, so a constant captured at load would name
+                  // the wrong port (and BACKEND_WS as a const didn't survive
+                  // the port becoming dynamic — resources/read threw
+                  // "BACKEND_WS is not defined" and the pane wouldn't load).
+                  connectDomains: [BACKEND, backendWs()],
                   resourceDomains: [],
                 },
               },
