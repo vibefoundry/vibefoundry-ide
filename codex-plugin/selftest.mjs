@@ -147,6 +147,8 @@ const firstHealth = await call("tools/call", {
   arguments: { path: "/api/health" },
 });
 const firstPid = ok(firstHealth) && firstHealth.result.structuredContent.json?.pid;
+const firstPort = ok(firstOpen) &&
+  Number(new URL(firstOpen.result.structuredContent.backendUrl).port);
 
 const secondOpen = await call("tools/call", { name: "open_vibefoundry", arguments: {} });
 check("second open uses the active project root",
@@ -157,9 +159,14 @@ const secondHealth = await call("tools/call", {
   arguments: { path: "/api/health" },
 });
 const secondPid = ok(secondHealth) && secondHealth.result.structuredContent.json?.pid;
+const secondPort = ok(secondOpen) &&
+  Number(new URL(secondOpen.result.structuredContent.backendUrl).port);
 check("each open starts a fresh backend process",
   Number.isInteger(firstPid) && Number.isInteger(secondPid) && firstPid !== secondPid,
   `${firstPid || "?"} -> ${secondPid || "?"}`);
+check("the conversation keeps one OS-assigned backend port",
+  Number.isInteger(firstPort) && firstPort > 0 && firstPort === secondPort,
+  `${firstPort || "?"} -> ${secondPort || "?"}`);
 check("each open re-reads Codex's active project root", rootRequests === 2, String(rootRequests));
 
 if (stderr.trim()) console.log("\nstderr:\n" + stderr.slice(0, 500));

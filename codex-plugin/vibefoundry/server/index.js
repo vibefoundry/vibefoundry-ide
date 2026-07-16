@@ -22,14 +22,11 @@
 const WIDGET_URI = "ui://widget/vibefoundry.html";
 const WIDGET_MIME = "text/html+skybridge";
 
-// The active backend URL changes on every open_vibefoundry call. Each call asks
-// Codex for its active project root and starts a new backend for that project;
-// existing backends are never adopted.
-let BACKEND = "http://127.0.0.1:8765";
-
-// Ports we're willing to run on. Matches the CLI's own search from 8765 up.
-const PORT_MIN = 8765;
-const PORT_MAX = 8799;
+// The OS assigns one free localhost port for this MCP session. Every
+// open_vibefoundry call restarts the backend on that same port so the pane's
+// backend URL and CSP stay stable for the lifetime of the conversation.
+let BACKEND = null;
+let SESSION_PORT = null;
 
 // Link the tool to its widget template. We set BOTH known conventions so that
 // whichever one this desktop-app build honors will match; extra keys are
@@ -124,10 +121,10 @@ function loadPaneHtml() {
 }
 
 function backendPort() {
-  return (BACKEND.match(/:(\d+)/) || [])[1] || "8765";
+  return String(SESSION_PORT || "");
 }
 function backendWs() {
-  return BACKEND.replace(/^http/, "ws");
+  return BACKEND && BACKEND.replace(/^http/, "ws");
 }
 function backendCmd() {
   if (process.env.VF_BACKEND_CMD) {
@@ -136,25 +133,39 @@ function backendCmd() {
   return "vibefoundry --port " + backendPort() + " --no-browser";
 }
 
-// --- Port discovery ------------------------------------------------------------
+// --- Session port ---------------------------------------------------------------
 const net = require("net");
 
-// Free means "we can actually bind it", not "nothing answered a health check" —
-// a port can be held by something that isn't ours and doesn't speak HTTP.
-function isPortFree(port) {
-  return new Promise(function (resolve) {
+// Port 0 asks the OS for any available ephemeral localhost port. Cache the
+// result so every backend launched by this MCP conversation uses the same URL.
+function ensureSessionPort() {
+  if (SESSION_PORT) return Promise.resolve(SESSION_PORT);
+  return new Promise(function (resolve, reject) {
     var srv = net.createServer();
-    srv.once("error", function () { resolve(false); });
-    srv.once("listening", function () { srv.close(function () { resolve(true); }); });
-    srv.listen(port, "127.0.0.1");
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", function () {
+      var address = srv.address();
+      var port = address && address.port;
+      srv.close(function () {
+        if (!port) {
+          reject(new Error("the operating system did not assign a localhost port"));
+          return;
+        }
+        SESSION_PORT = port;
+        BACKEND = "http://127.0.0.1:" + port;
+        resolve(port);
+      });
+    });
   });
 }
 
-async function findFreePort() {
-  for (var p = PORT_MIN; p <= PORT_MAX; p++) {
-    if (await isPortFree(p)) return p;
-  }
-  return null;
+function portIsOpen(port) {
+  return new Promise(function (resolve) {
+    var socket = net.createConnection({ host: "127.0.0.1", port: port });
+    socket.once("connect", function () { socket.destroy(); resolve(true); });
+    socket.once("error", function () { resolve(false); });
+    socket.setTimeout(200, function () { socket.destroy(); resolve(false); });
+  });
 }
 
 // Compare real paths, not strings. The backend reports its folder resolved, so
@@ -198,7 +209,7 @@ async function stopBackend() {
   var oldPort = Number(backendPort());
   killBackend();
   for (var i = 0; i < 20; i++) {
-    if (await isPortFree(oldPort)) return;
+    if (!(await portIsOpen(oldPort))) return;
     await sleep(100);
   }
 }
@@ -241,13 +252,9 @@ function resolveBundledPython() {
 }
 
 async function startFreshBackend(project) {
+  var port = await ensureSessionPort();
   await stopBackend();
 
-  var port = await findFreePort();
-  if (!port) {
-    return { started: false, ok: false, error: "no free port in " + PORT_MIN + "-" + PORT_MAX };
-  }
-  BACKEND = "http://127.0.0.1:" + port;
   try {
     // detached: own process group, so killBackend can signal the whole tree.
     var opts = {
@@ -879,6 +886,7 @@ async function handle(msg) {
       if (params.uri !== WIDGET_URI) {
         return error(id, -32602, "Unknown resource: " + params.uri);
       }
+      await ensureSessionPort();
       var paneHtml = loadPaneHtml();
       return result(id, {
         contents: [
