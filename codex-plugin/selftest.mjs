@@ -13,14 +13,61 @@
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MCP = process.argv[2] || join(HERE, "vibefoundry/server/index.js");
+const TEMP = await mkdtemp(join(tmpdir(), "vibefoundry-mcp-selftest-"));
+const PROJECT = join(TEMP, "project-one");
+const PROJECT_TWO = join(TEMP, "project-two");
+const MOCK = join(TEMP, "mock-backend.mjs");
+await mkdir(PROJECT);
+await mkdir(PROJECT_TWO);
+await writeFile(MOCK, `#!/usr/bin/env node
+import http from "node:http";
+const args = process.argv.slice(2);
+const port = Number(args[args.indexOf("--port") + 1]);
+const project = args[args.length - 1];
+const server = http.createServer((req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  if (req.url === "/api/health") {
+    res.end(JSON.stringify({
+      status: "ok",
+      project_folder: project,
+      version: "selftest",
+      pid: process.pid,
+    }));
+    return;
+  }
+  if (req.url === "/api/catalog") {
+    res.end(JSON.stringify({ datasets: [] }));
+    return;
+  }
+  if (req.url === "/api/files/tree") {
+    res.end(JSON.stringify({ tree: { children: [] } }));
+    return;
+  }
+  res.statusCode = 404;
+  res.end(JSON.stringify({ detail: "Not Found" }));
+});
+server.listen(port, "127.0.0.1");
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`);
+await chmod(MOCK, 0o755);
 
-const child = spawn("node", [MCP], { stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn("node", [MCP], {
+  stdio: ["pipe", "pipe", "pipe"],
+  env: {
+    ...process.env,
+    VF_BACKEND_CMD: `"${process.execPath}" "${MOCK}" --port {port} --no-browser`,
+  },
+});
 let buf = "";
 let stderr = "";
+let rootRequests = 0;
 const pending = {};
 child.stderr.on("data", (d) => (stderr += d));
 child.stdout.on("data", (d) => {
@@ -32,6 +79,16 @@ child.stdout.on("data", (d) => {
     if (!line.trim()) continue;
     try {
       const m = JSON.parse(line);
+      if (m.method === "roots/list") {
+        rootRequests++;
+        const activeProject = rootRequests === 1 ? PROJECT : PROJECT_TWO;
+        child.stdin.write(JSON.stringify({
+          jsonrpc: "2.0",
+          id: m.id,
+          result: { roots: [{ uri: pathToFileURL(activeProject).href, name: "active-project" }] },
+        }) + "\n");
+        continue;
+      }
       if (pending[m.id]) { pending[m.id](m); delete pending[m.id]; }
     } catch { /* not our line */ }
   }
@@ -81,7 +138,32 @@ if (ok(rr)) {
     JSON.stringify(domains));
 }
 
+const firstOpen = await call("tools/call", { name: "open_vibefoundry", arguments: {} });
+check("first open uses the active project root",
+  ok(firstOpen) && firstOpen.result.structuredContent.projectFolder === PROJECT,
+  ok(firstOpen) ? JSON.stringify(firstOpen.result.structuredContent) : why(firstOpen));
+const firstHealth = await call("tools/call", {
+  name: "vf_request",
+  arguments: { path: "/api/health" },
+});
+const firstPid = ok(firstHealth) && firstHealth.result.structuredContent.json?.pid;
+
+const secondOpen = await call("tools/call", { name: "open_vibefoundry", arguments: {} });
+check("second open uses the active project root",
+  ok(secondOpen) && secondOpen.result.structuredContent.projectFolder === PROJECT_TWO,
+  ok(secondOpen) ? JSON.stringify(secondOpen.result.structuredContent) : why(secondOpen));
+const secondHealth = await call("tools/call", {
+  name: "vf_request",
+  arguments: { path: "/api/health" },
+});
+const secondPid = ok(secondHealth) && secondHealth.result.structuredContent.json?.pid;
+check("each open starts a fresh backend process",
+  Number.isInteger(firstPid) && Number.isInteger(secondPid) && firstPid !== secondPid,
+  `${firstPid || "?"} -> ${secondPid || "?"}`);
+check("each open re-reads Codex's active project root", rootRequests === 2, String(rootRequests));
+
 if (stderr.trim()) console.log("\nstderr:\n" + stderr.slice(0, 500));
 child.kill();
+await rm(TEMP, { recursive: true, force: true });
 console.log(failed ? `\n${failed} CHECK(S) FAILED` : "\nALL CHECKS PASSED");
 process.exit(failed ? 1 : 0);

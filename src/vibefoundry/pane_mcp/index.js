@@ -22,21 +22,10 @@
 const WIDGET_URI = "ui://widget/vibefoundry.html";
 const WIDGET_MIME = "text/html+skybridge";
 
-// Where the real VibeFoundry FastAPI backend runs.
-//
-// NOT a fixed port. It used to be pinned to 8765, which meant: if anything else
-// already held 8765 (a `vibefoundry` in a terminal, a leftover from a previous
-// session), we passed --port 8765 anyway — and an explicit --port skips the
-// CLI's find_available_port(), so there was no fallback. The spawn could never
-// bind, while the health check happily passed against the *other* process. The
-// pane then silently drove someone else's backend, rooted at whatever project
-// THAT was opened with (a `vibefoundry` launched from ~ roots at the whole home
-// directory, which is why the pane crawled).
-//
-// Now: adopt an existing backend only if it's serving the project we want, else
-// pick a genuinely free port and remember it. VF_BACKEND still pins it if set.
-const BACKEND_FIXED = process.env.VF_BACKEND || null;
-let BACKEND = BACKEND_FIXED || "http://127.0.0.1:8765";
+// The active backend URL changes on every open_vibefoundry call. Each call asks
+// Codex for its active project root and starts a new backend for that project;
+// existing backends are never adopted.
+let BACKEND = "http://127.0.0.1:8765";
 
 // Ports we're willing to run on. Matches the CLI's own search from 8765 up.
 const PORT_MIN = 8765;
@@ -120,6 +109,7 @@ const SESSION_INSTRUCTIONS = [
 const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { fileURLToPath } = require("url");
 
 // The real VibeFoundry UI, built as one self-contained HTML by
 // `vite build --config vite.pane.config.js`. If present, we serve it as the
@@ -140,10 +130,10 @@ function backendWs() {
   return BACKEND.replace(/^http/, "ws");
 }
 function backendCmd() {
-  return (
-    process.env.VF_BACKEND_CMD ||
-    "vibefoundry --port " + backendPort() + " --no-browser"
-  );
+  if (process.env.VF_BACKEND_CMD) {
+    return process.env.VF_BACKEND_CMD.replace(/\{port\}/g, backendPort());
+  }
+  return "vibefoundry --port " + backendPort() + " --no-browser";
 }
 
 // --- Port discovery ------------------------------------------------------------
@@ -167,15 +157,6 @@ async function findFreePort() {
   return null;
 }
 
-function healthAt(port, timeoutMs) {
-  var ctrl = new AbortController();
-  var t = setTimeout(function () { ctrl.abort(); }, timeoutMs || 700);
-  return fetch("http://127.0.0.1:" + port + "/api/health", { signal: ctrl.signal })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .catch(function () { return null; })
-    .then(function (j) { clearTimeout(t); return j; });
-}
-
 // Compare real paths, not strings. The backend reports its folder resolved, so
 // on macOS "/tmp/x" comes back as "/private/tmp/x" — a string compare would call
 // the same project a different one and spawn a redundant backend every launch.
@@ -186,19 +167,6 @@ function samePath(a, b) {
     catch (e) { return String(s).replace(/\/+$/, ""); }  // may not exist yet
   };
   return real(a) === real(b);
-}
-
-// Find a RUNNING backend we're willing to use. "Willing" is the point: adopting
-// anything that answers is how the pane ended up driving a home-directory-rooted
-// server. If a project was requested, the backend must actually be serving it.
-async function findUsableBackend(project) {
-  for (var p = PORT_MIN; p <= PORT_MAX; p++) {
-    var h = await healthAt(p, 400);
-    if (!h || h.status !== "ok") continue;
-    if (!project) return p;                       // no preference — any will do
-    if (samePath(h.project_folder, project)) return p;
-  }
-  return null;
 }
 
 let backendChild = null;
@@ -222,6 +190,19 @@ function killBackend() {
   } catch (e) {}
 }
 
+async function stopBackend() {
+  if (!backendAlive()) {
+    backendChild = null;
+    return;
+  }
+  var oldPort = Number(backendPort());
+  killBackend();
+  for (var i = 0; i < 20; i++) {
+    if (await isPortFree(oldPort)) return;
+    await sleep(100);
+  }
+}
+
 ["exit", "SIGINT", "SIGTERM", "SIGHUP"].forEach(function (sig) {
   process.on(sig, function () {
     killBackend();
@@ -233,17 +214,15 @@ function sleep(ms) {
   return new Promise(function (r) { setTimeout(r, ms); });
 }
 
-function healthCheck(timeoutMs) {
+function backendHealth(timeoutMs) {
   var ctrl = new AbortController();
   var t = setTimeout(function () { ctrl.abort(); }, timeoutMs);
   return fetch(BACKEND + "/api/health", { signal: ctrl.signal })
-    .then(function (r) { return r.ok; })
-    .catch(function () { return false; })
-    .then(function (ok) { clearTimeout(t); return ok; });
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .catch(function () { return null; })
+    .then(function (health) { clearTimeout(t); return health; });
 }
 
-// Ensure the backend is up. Reuses an already-running instance (started
-// manually or by a prior call) via the health check before spawning a new one.
 // Resolve the Python interpreter that OWNS this package so we can run
 // `python -m vibefoundry` directly — no PATH guessing, works on any OS.
 // pane_mcp/index.js lives at <env>/.../site-packages/vibefoundry/pane_mcp/.
@@ -261,72 +240,72 @@ function resolveBundledPython() {
   return null;
 }
 
-async function ensureBackend(project) {
-  // 1. Our own child, still up and serving what we asked for? Reuse it.
-  if (backendAlive() && (await healthCheck(800))) {
-    return { started: false, ok: true, port: backendPort() };
-  }
+async function startFreshBackend(project) {
+  await stopBackend();
 
-  // 2. Someone else's backend — adopt ONLY if it's serving this project. A
-  //    `vibefoundry` running in a terminal (rooted at ~, indexing the whole home
-  //    directory) must not get silently adopted just because it answers.
-  if (BACKEND_FIXED) {
-    if (await healthCheck(800)) return { started: false, ok: true, port: backendPort() };
-  } else {
-    var existing = await findUsableBackend(project);
-    if (existing !== null) {
-      BACKEND = "http://127.0.0.1:" + existing;
-      return { started: false, ok: true, port: String(existing), adopted: true };
-    }
+  var port = await findFreePort();
+  if (!port) {
+    return { started: false, ok: false, error: "no free port in " + PORT_MIN + "-" + PORT_MAX };
   }
-
-  // 3. Nothing usable — start our own on a port that's genuinely free. Pinning
-  //    8765 meant colliding with whatever already held it and never binding.
-  if (!backendAlive()) {
-    var port = BACKEND_FIXED ? backendPort() : await findFreePort();
-    if (!port) {
-      return { started: false, ok: false, error: "no free port in " + PORT_MIN + "-" + PORT_MAX };
-    }
-    if (!BACKEND_FIXED) BACKEND = "http://127.0.0.1:" + port;
-    try {
-      // detached: own process group, so killBackend can signal the whole tree.
-      var opts = {
-        stdio: "ignore",
-        env: process.env,
-        windowsHide: true,
-        detached: process.platform !== "win32",
-      };
-      var py = resolveBundledPython();
-      if (py) {
-        // Preferred: run the exact interpreter that has vibefoundry installed.
-        var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser"];
-        if (project) args.push(project);
-        backendChild = spawn(py, args, opts);
+  BACKEND = "http://127.0.0.1:" + port;
+  try {
+    // detached: own process group, so killBackend can signal the whole tree.
+    var opts = {
+      stdio: "ignore",
+      env: process.env,
+      windowsHide: true,
+      detached: process.platform !== "win32",
+    };
+    var py = resolveBundledPython();
+    if (py) {
+      // Preferred: run the exact interpreter that has vibefoundry installed.
+      var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser", project];
+      backendChild = spawn(py, args, opts);
+    } else {
+      // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
+      var cmd = backendCmd() + ' "' + String(project).replace(/"/g, '\\"') + '"';
+      if (process.platform === "win32") {
+        backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], opts);
       } else {
-        // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
-        var cmd = backendCmd();
-        if (project) cmd += ' "' + String(project).replace(/"/g, '\\"') + '"';
-        if (process.platform === "win32") {
-          backendChild = spawn(process.env.ComSpec || "cmd.exe", ["/c", cmd], opts);
-        } else {
-          var shell = process.env.SHELL || "/bin/sh";
-          backendChild = spawn(shell, ["-lc", cmd], opts);
-        }
+        var shell = process.env.SHELL || "/bin/sh";
+        backendChild = spawn(shell, ["-lc", cmd], opts);
       }
-      backendChild.on("error", function () {});
-      // Don't keep the MCP server's event loop alive on the backend's account.
-      backendChild.unref();
-    } catch (e) {
-      return { started: false, ok: false, error: String(e && e.message) };
     }
+    backendChild.on("error", function () {});
+    // Don't keep the MCP server's event loop alive on the backend's account.
+    backendChild.unref();
+  } catch (e) {
+    return { started: false, ok: false, error: String(e && e.message) };
   }
 
   // Poll for readiness (~20s).
   for (var i = 0; i < 40; i++) {
     await sleep(500);
-    if (await healthCheck(800)) return { started: true, ok: true, port: backendPort() };
+    var health = await backendHealth(800);
+    if (health && health.status === "ok") {
+      if (!samePath(health.project_folder, project)) {
+        killBackend();
+        return {
+          started: true,
+          ok: false,
+          port: backendPort(),
+          error: "backend opened the wrong project: " + (health.project_folder || "(none)"),
+        };
+      }
+      return { started: true, ok: true, port: backendPort() };
+    }
   }
+  killBackend();
   return { started: true, ok: false, port: backendPort() };
+}
+
+let backendLaunchQueue = Promise.resolve();
+function queueFreshBackend(project) {
+  var launch = backendLaunchQueue.then(function () {
+    return startFreshBackend(project);
+  });
+  backendLaunchQueue = launch.catch(function () {});
+  return launch;
 }
 
 // --- The widget (self-contained, no external assets → no CSP surprises) --------
@@ -499,21 +478,12 @@ const TOOL = {
     "\"open the IDE\", \"open my data workspace\", \"show VibeFoundry\", " +
     "\"start the data pane\". It auto-starts the local backend if needed and " +
     "renders the full VibeFoundry UI (file browser, data preview, scripts) as " +
-    "a fullscreen pane. Pass the `project` argument when the user names a " +
-    "specific project folder. Match generously through misspellings, " +
+    "a fullscreen pane. It always uses Codex's active project root and starts " +
+    "a fresh backend for that project. Match generously through misspellings, " +
     "transpositions, spacing, and abbreviations — e.g. \"open vfoundry\", " +
     "\"open videfoundry\", \"open vibe foundry\", \"open vibefoundy\", " +
     "\"open VF\" all refer to VibeFoundry and MUST trigger this tool.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      project: {
-        type: "string",
-        description: "Optional path to the project folder to open.",
-      },
-    },
-    required: [],
-  },
+  inputSchema: { type: "object", properties: {}, required: [] },
   _meta: TOOL_META,
 };
 
@@ -664,6 +634,63 @@ function error(id, code, message) {
   send({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
 }
 
+let nextClientRequestId = 0;
+const pendingClientRequests = new Map();
+
+function requestClient(method, params, timeoutMs) {
+  return new Promise(function (resolve, reject) {
+    var id = "vibefoundry-" + (++nextClientRequestId);
+    var timer = setTimeout(function () {
+      pendingClientRequests.delete(id);
+      reject(new Error(method + " timed out"));
+    }, timeoutMs || 5000);
+    pendingClientRequests.set(id, {
+      resolve: function (value) { clearTimeout(timer); resolve(value); },
+      reject: function (err) { clearTimeout(timer); reject(err); },
+    });
+    send({ jsonrpc: "2.0", id: id, method: method, params: params || {} });
+  });
+}
+
+function handleClientResponse(msg) {
+  var pending = pendingClientRequests.get(msg.id);
+  if (!pending) return false;
+  pendingClientRequests.delete(msg.id);
+  if (msg.error) {
+    pending.reject(new Error(msg.error.message || "client request failed"));
+  } else {
+    pending.resolve(msg.result);
+  }
+  return true;
+}
+
+async function activeProjectRoot() {
+  var result = await requestClient("roots/list", {}, 5000);
+  var roots = (result && result.roots) || [];
+  if (!roots.length) {
+    throw new Error("Codex did not provide an active project root");
+  }
+
+  // Codex presents the active project root first. Resolve it on every launch so
+  // a long-lived MCP process follows the project currently open in the client.
+  var root = roots[0];
+  if (!root.uri || !String(root.uri).startsWith("file:")) {
+    throw new Error("Codex's active project root is not a local filesystem folder");
+  }
+
+  var project = fileURLToPath(root.uri);
+  var stat;
+  try {
+    stat = fs.statSync(project);
+  } catch (e) {
+    throw new Error("Codex's active project root does not exist: " + project);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error("Codex's active project root is not a directory: " + project);
+  }
+  return path.resolve(project);
+}
+
 async function handle(msg) {
   var id = msg.id;
   var method = msg.method;
@@ -704,7 +731,9 @@ async function handle(msg) {
       if (name === CATALOG_TOOL.name) {
         // The backend must be up to serve the catalogue; start it if it isn't,
         // so asking about data works without opening the pane first.
-        await ensureBackend(null);
+        if (!backendAlive() || !(await backendHealth(800))) {
+          await queueFreshBackend(await activeProjectRoot());
+        }
         var cat = await catalogTool(params.arguments || {});
         var summary = cat.error
           ? "Catalogue error: " + cat.error
@@ -720,16 +749,14 @@ async function handle(msg) {
       if (name !== TOOL.name) {
         return error(id, -32602, "Unknown tool: " + name);
       }
-      var project = (params.arguments && params.arguments.project) || null;
-      var backend = await ensureBackend(project);
+      var project = await activeProjectRoot();
+      var backend = await queueFreshBackend(project);
       var message = backend.ok
-        ? (backend.started
-            ? "VibeFoundry backend started."
-            : "VibeFoundry backend already running.")
+        ? "VibeFoundry backend started."
         : "VibeFoundry pane opened, but the backend did not come up" +
           (backend.error ? " (" + backend.error + ")" : "") +
           " — set VF_BACKEND_CMD to the correct launch command.";
-      if (project) message += " Project: " + project;
+      message += " Project: " + project;
 
       // Launching is the moment to frame the rest of the conversation. The model
       // reads this reply, so it's where "from here on, work through VibeFoundry"
@@ -902,6 +929,9 @@ process.stdin.on("data", function (chunk) {
       msg = JSON.parse(line);
     } catch (e) {
       continue; // ignore malformed lines
+    }
+    if (msg.method == null && msg.id != null && handleClientResponse(msg)) {
+      continue;
     }
     Promise.resolve()
       .then(function () { return handle(msg); })

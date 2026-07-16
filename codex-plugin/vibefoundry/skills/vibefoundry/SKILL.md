@@ -17,9 +17,7 @@ Trigger phrases (non-exhaustive):
 
 Match generously — the user will misspell, abbreviate, or space it differently. Treat all of these (and obvious typos of them) as the same request: **vibefoundry, vibe foundry, vfoundry, videfoundry, vibefndry, vibefoundy, vibfoundry, vibefoundr, VF**. If the user's message is clearly about opening this app despite a typo, call the tool anyway.
 
-The tool auto-starts the local backend if it isn't running and renders the full VibeFoundry UI as a fullscreen pane.
-
-Pass the `project` argument when the user names a specific project folder to open (e.g. "open VibeFoundry for ~/Documents/my_project"). Otherwise omit it and the backend's current folder is used.
+The tool asks Codex for its active project root, starts a fresh local backend rooted there, and renders the full VibeFoundry UI as a fullscreen pane. Call it with no arguments. Never infer the project from the MCP process's working directory and never select or pass a different folder.
 
 ## After it's open — work through VibeFoundry
 
