@@ -1,2 +1,7 @@
 azure-functions
+azure-storage-blob
 openai>=2.0.0
+httpx
+polars-lts-cpu>=1.0.0
+openpyxl>=3.1.0
+fastexcel
