@@ -226,6 +226,63 @@ async def fetch_and_profile(
     return profile_frame(df, f["name"], len(buf))
 
 
+async def fetch_preview(
+    client: httpx.AsyncClient, host: str, site: str, token: str,
+    sru: str, name: str, rows: int = 100,
+) -> dict:
+    """First `rows` of a dataset, fetched on demand.
+
+    Deliberately NOT cached into catalog.json: the profile there only holds
+    aggregates and a few distinct values, and keeping a slab of real rows at rest
+    is a bigger exposure than the catalogue needs. This is cheap anyway — for CSV
+    we stop reading as soon as we have enough lines (a 100MB file yields 100 rows
+    in well under a second), so nothing like the full download happens.
+    """
+    url = (
+        f"https://{host}{site}/_api/web/GetFileByServerRelativeUrl"
+        f"('{quote(sru, safe='/')}')/$value"
+    )
+    suffix = Path(name).suffix.lower()
+    streamable = suffix in (".csv", ".tsv")
+    want_lines = rows + 1  # header
+
+    buf = bytearray()
+    async with client.stream(
+        "GET", url, headers={"Authorization": f"Bearer {token}"}
+    ) as r:
+        if r.status_code != 200:
+            body = await r.aread()
+            raise RuntimeError(f"SharePoint read failed ({r.status_code}): {body[:200]!r}")
+        async for chunk in r.aiter_bytes(1 << 16):
+            buf.extend(chunk)
+            # Range is ignored by SharePoint, so we abort the transfer instead.
+            if streamable and buf.count(b"\n") > want_lines:
+                break
+            if not streamable and len(buf) > (64 << 20):
+                break  # parquet/xlsx need the whole file; don't run away with it
+
+    raw = bytes(buf)
+    if streamable:
+        # Drop the final line: aborting mid-transfer usually tears it in half.
+        cut = raw.rfind(b"\n")
+        if cut > 0:
+            raw = raw[:cut]
+    df = _read_bytes(name, raw).head(rows)
+    return {
+        "columns": df.columns,
+        "rows": [[_cell(v) for v in row] for row in df.rows()],
+        "truncated": True,
+    }
+
+
+def _cell(v):
+    if v is None:
+        return None
+    if isinstance(v, (int, float, bool, str)):
+        return v
+    return str(v)
+
+
 async def describe(
     client: httpx.AsyncClient, profile: dict, siblings: list[str]
 ) -> dict:

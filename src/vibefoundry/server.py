@@ -2535,6 +2535,46 @@ async def catalog_get(folder: str = ""):
     }
 
 
+@app.get("/api/catalog/preview")
+async def catalog_preview(path: str, rows: int = 100):
+    """First N rows of a catalogued dataset, fetched live from SharePoint.
+
+    On demand rather than cached: the catalogue holds aggregates, not slabs of
+    real rows. `path` is the dataset's path relative to the catalogued folder.
+    """
+    cat = _cat.read_catalog()
+    folder = cat.get("folder")
+    if not folder:
+        raise HTTPException(status_code=400, detail="No catalogue has been built yet")
+
+    entry = next(
+        (d for d in cat.get("datasets", {}).values()
+         if (d.get("path") or d.get("name")) == path),
+        None,
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"'{path}' is not in the catalogue")
+
+    cfg = _sp_read()
+    host, site = cfg.get("host"), cfg.get("site")
+    if not host or not site:
+        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+    token = await _sp_access_token()
+
+    sru = f"{folder}/{path}"
+    async with httpx.AsyncClient(timeout=300) as client:
+        try:
+            preview = await _cat.fetch_preview(
+                client, host, site, token, sru, entry["name"], min(max(rows, 1), 500)
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}")
+
+    preview["name"] = entry["name"]
+    preview["path"] = path
+    return preview
+
+
 class CatalogBuildRequest(BaseModel):
     folder: str = ""     # server-relative SharePoint folder; defaults to the library root
     refresh: bool = False  # re-describe even if the fingerprint is unchanged

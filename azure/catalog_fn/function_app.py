@@ -28,15 +28,19 @@ RESPONSE_SCHEMA = {
     "properties": {
         "title": {
             "type": "string",
-            "description": "Short human title for the dataset, e.g. 'Daily unit sales by item and store'",
+            "description": "Short plain-English title, max ~8 words. e.g. 'Daily sales by product and store'",
         },
         "summary": {
             "type": "string",
-            "description": "2-3 sentences: what this dataset contains and what it is for.",
+            "description": (
+                "Two or three short, plain sentences describing WHAT THIS DATASET IS "
+                "as a whole — the real-world thing it captures, what it covers, what "
+                "it's for. Not a description of its columns."
+            ),
         },
         "grain": {
             "type": "string",
-            "description": "What one row represents, e.g. 'one item-store combination'.",
+            "description": "One short sentence starting 'One row is'. e.g. 'One row is one product in one store.'",
         },
         "columns": {
             "type": "array",
@@ -56,19 +60,45 @@ RESPONSE_SCHEMA = {
 }
 
 SYSTEM = (
-    "You write data catalogue entries. You are given a statistical profile of a "
-    "dataset: column names, types, and either distinct values (categorical) or "
-    "summary statistics (continuous). Infer what the dataset actually is and "
-    "describe it for an analyst who has never seen it.\n\n"
-    "Rules:\n"
-    "- Be concrete and specific. 'Daily unit sales per item per store' beats "
-    "'a table of sales data'.\n"
-    "- Say what one row represents (the grain).\n"
-    "- Describe every column you are given, briefly. Explain what the column "
-    "means, not its datatype - the reader can already see the type.\n"
-    "- If a column is cryptic and the profile does not disambiguate it, say so "
-    "plainly rather than inventing a meaning.\n"
-    "- Do not speculate beyond what the profile supports."
+    "You write data catalogue entries in PLAIN ENGLISH. You are given a "
+    "statistical profile of a dataset: column names, types, and either distinct "
+    "values (categorical) or summary statistics (continuous). Work out what the "
+    "dataset actually is and explain it to a smart colleague who has never seen "
+    "it and is not a data engineer.\n\n"
+    "THE SUMMARY IS ABOUT THE DATASET AS A WHOLE — not its columns.\n"
+    "Answer: what IS this? What real-world thing does it capture, over what\n"
+    "scope and period, and what would someone use it for? The reader can see the\n"
+    "columns and statistics elsewhere; do not narrate them back.\n"
+    "  GOOD: 'Retail sales history for a US grocery chain. It tracks how many\n"
+    "  units of each product sold each day across four California stores over\n"
+    "  roughly two years — the kind of data used for demand forecasting and\n"
+    "  inventory planning.'\n"
+    "  BAD (this is column narration, do not do it): 'Wide-format daily\n"
+    "  unit-sales history for 3,049 items. The 732 d_ columns are numbered days.\n"
+    "  Across days d_1210 to d_1253 the average is 1 to 2 units.'\n"
+    "Do NOT list, name or explain columns in the summary. Do NOT quote averages,\n"
+    "minimums or maximums. Numbers only where they convey scale, and ONLY where\n"
+    "the profile actually supports them.\n"
+    "TIME PERIODS: state one only if a temporal column gives you a real date\n"
+    "range. NEVER infer a period from a column count, a row count, or codes like\n"
+    "week numbers or day keys — you will get it wrong. If there's no date range\n"
+    "in the profile, just don't mention the period at all.\n\n"
+    "Write like a person, not a data warehouse:\n"
+    "- Short, ordinary sentences. Two or three, never more.\n"
+    "- BANNED words, they mean nothing to most readers: wide-format, long-format,\n"
+    "  dimension, dimension table, fact table, grain, granularity, cardinality,\n"
+    "  schema, entity, denormalised, time-series period, supports X-level\n"
+    "  analysis, this dataset contains, this table records.\n"
+    "- Infer the domain from the data and say it. Product codes like\n"
+    "  HOBBIES_1_001 and stores like CA_1 mean retail, so say retail.\n"
+    "- If another dataset is needed to make sense of this one, that's worth one\n"
+    "  short clause at the end — not a paragraph.\n\n"
+    "The `grain` field: what one row is, one short sentence starting 'One row\n"
+    "is'. E.g. 'One row is one product in one store.' Never use the word grain.\n\n"
+    "Column descriptions: one short line each, what it means in practice. Skip\n"
+    "the datatype, the reader can see it. If a column is cryptic and the profile\n"
+    "doesn't disambiguate it, say so plainly rather than inventing a meaning.\n"
+    "Never speculate beyond what the profile supports."
 )
 
 

@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 // The Data Catalogue: what's in the connected SharePoint library, described.
-// Profiles are computed by the backend (which reads SharePoint directly) and the
-// prose comes from the Azure describer. Both are cached, so this view is a plain
-// read of ~/.vibefoundry/catalog.json unless the user explicitly rebuilds.
+//
+// The list stays deliberately quiet — a title, one line, and the numbers. An
+// earlier version put the full summary, the row grain and a column toggle on
+// every card, which read as a wall of text and made three datasets look like a
+// research paper. Detail lives in the modal instead: double-click a row for the
+// description, a live 100-row preview, and the column profile.
 
 const fmtBytes = (n) => {
   if (!n && n !== 0) return ''
@@ -16,91 +20,161 @@ const fmtBytes = (n) => {
 
 const fmtWhen = (ts) => {
   if (!ts) return 'never'
-  const d = new Date(ts * 1000)
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return new Date(ts * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-const ColumnRow = ({ col }) => {
-  const stat =
-    col.kind === 'categorical'
-      ? `${col.n_unique?.toLocaleString()} distinct${col.values?.length ? ' · ' + col.values.slice(0, 4).join(', ') : ''}`
-      : col.kind === 'temporal'
-        ? `${col.min} → ${col.max}`
-        : [
-            col.min != null ? `min ${col.min}` : null,
-            col.max != null ? `max ${col.max}` : null,
-            col.mean != null ? `mean ${col.mean}` : null,
-          ].filter(Boolean).join(' · ')
-  return (
-    <tr className="dc-col-row">
-      <td className="dc-col-name">{col.name}</td>
-      <td className="dc-col-kind"><span className={`dc-kind dc-kind-${col.kind}`}>{col.kind}</span></td>
-      <td className="dc-col-desc">{col.description || <span className="dc-muted">—</span>}</td>
-      <td className="dc-col-stat">{stat}</td>
-    </tr>
+const colStat = (c) => {
+  if (c.kind === 'categorical') {
+    const vals = (c.values || []).slice(0, 3).join(', ')
+    return `${c.n_unique?.toLocaleString()} values${vals ? ' · ' + vals : ''}`
+  }
+  if (c.kind === 'temporal') return `${c.min} → ${c.max}`
+  return [
+    c.min != null ? `min ${c.min}` : null,
+    c.max != null ? `max ${c.max}` : null,
+    c.mean != null ? `avg ${c.mean}` : null,
+  ].filter(Boolean).join(' · ')
+}
+
+// --- Detail modal ------------------------------------------------------------
+const DatasetModal = ({ ds, onClose, onPull, pulling }) => {
+  const [tab, setTab] = useState('preview')
+  const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setPreview(null)
+    setError(null)
+    // Fetched live rather than cached: the catalogue keeps aggregates, not rows.
+    fetch(`/api/catalog/preview?path=${encodeURIComponent(ds.path || ds.name)}&rows=100`)
+      .then((r) => (r.ok ? r.json() : r.json().then((d) => Promise.reject(new Error(d.detail || 'Preview failed')))))
+      .then((d) => { if (!cancelled) setPreview(d) })
+      .catch((e) => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
+  }, [ds.path, ds.name])
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return createPortal(
+    <div className="dc-modal-overlay" onClick={onClose}>
+      <div className="dc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="dc-modal-head">
+          <div className="dc-modal-titles">
+            <h3>{ds.title || ds.name}</h3>
+            <span className="dc-mono">{ds.path || ds.name}</span>
+          </div>
+          <button className="dc-x" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        <div className="dc-modal-body">
+          {ds.summary && <p className="dc-modal-summary">{ds.summary}</p>}
+          <div className="dc-facts">
+            <span><strong>{ds.rows?.toLocaleString()}</strong> rows</span>
+            <span><strong>{ds.n_columns}</strong> columns</span>
+            <span>{fmtBytes(ds.size_bytes)}</span>
+            {ds.grain && <span className="dc-grain">{ds.grain}</span>}
+          </div>
+
+          <div className="dc-tabs">
+            <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}>
+              Preview
+            </button>
+            <button className={tab === 'columns' ? 'active' : ''} onClick={() => setTab('columns')}>
+              Columns ({ds.columns?.length || 0})
+            </button>
+          </div>
+
+          {tab === 'preview' ? (
+            error ? (
+              <p className="dc-error dc-pad">Couldn’t load a preview: {error}</p>
+            ) : !preview ? (
+              <p className="dc-muted dc-pad">Loading the first 100 rows…</p>
+            ) : (
+              <div className="dc-table-wrap dc-preview-wrap">
+                <table className="dc-table dc-preview">
+                  <thead>
+                    <tr>{preview.columns.map((c) => <th key={c}>{c}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {preview.rows.map((row, i) => (
+                      <tr key={i}>
+                        {row.map((v, j) => (
+                          <td key={j}>{v === null ? <span className="dc-null">null</span> : String(v)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            <div className="dc-table-wrap">
+              <table className="dc-table">
+                <thead>
+                  <tr><th>Column</th><th>Type</th><th>Description</th><th>Values</th></tr>
+                </thead>
+                <tbody>
+                  {(ds.columns || []).map((c) => (
+                    <tr key={c.name}>
+                      <td className="dc-mono dc-nowrap">{c.name}</td>
+                      <td><span className={`dc-kind dc-kind-${c.kind}`}>{c.kind}</span></td>
+                      <td className="dc-col-desc">{c.description || <span className="dc-muted">—</span>}</td>
+                      <td className="dc-col-stat">{colStat(c)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {ds.n_columns > (ds.columns?.length || 0) && (
+                <p className="dc-muted dc-pad">Showing {ds.columns.length} of {ds.n_columns} columns.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="dc-modal-foot">
+          <span className="dc-muted">{preview ? 'First 100 rows, read live from SharePoint.' : ''}</span>
+          <div className="dc-foot-actions">
+            <button className="btn-flat" onClick={onClose}>Close</button>
+            <button className="btn-primary" disabled={pulling} onClick={() => onPull(ds)}>
+              {pulling ? 'Pulling…' : 'Pull into input_folder'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
-const DatasetCard = ({ ds, onPull, pulling }) => {
-  const [open, setOpen] = useState(false)
+// --- List row ----------------------------------------------------------------
+const Row = ({ ds, onOpen }) => {
   if (ds.error) {
     return (
-      <div className="dc-card dc-card-error">
-        <div className="dc-card-head">
-          <span className="dc-name">{ds.name}</span>
-          <span className="dc-muted">{fmtBytes(ds.size_bytes)}</span>
+      <div className="dc-row dc-row-error">
+        <div className="dc-row-main">
+          <span className="dc-row-title">{ds.name}</span>
+          <span className="dc-row-sub">Couldn’t be catalogued — {ds.error}</span>
         </div>
-        <div className="dc-error">Could not catalogue this file: {ds.error}</div>
       </div>
     )
   }
   return (
-    <div className="dc-card">
-      <div className="dc-card-head">
-        <div className="dc-head-left">
-          <span className="dc-title">{ds.title || ds.name}</span>
-          {/* Show the subfolder path when there is one — with the walk, two
-              folders can each hold a sales.csv. */}
-          <span className="dc-name">{ds.path || ds.name}</span>
-        </div>
-        <div className="dc-head-right">
-          <button
-            className="btn-flat"
-            disabled={pulling}
-            onClick={() => onPull(ds)}
-            title="Copy this dataset into input_folder"
-          >
-            {pulling ? 'Pulling…' : 'Pull'}
-          </button>
-        </div>
+    <div className="dc-row" onDoubleClick={() => onOpen(ds)} title="Double-click to preview">
+      <div className="dc-row-main">
+        <span className="dc-row-title">{ds.title || ds.name}</span>
+        <span className="dc-row-sub">{ds.grain || ds.summary}</span>
       </div>
-      {ds.summary && <p className="dc-summary">{ds.summary}</p>}
-      <div className="dc-facts">
-        <span><strong>{ds.rows?.toLocaleString()}</strong> rows</span>
-        <span><strong>{ds.n_columns}</strong> columns</span>
+      <div className="dc-row-meta">
+        <span className="dc-mono dc-row-file">{ds.path || ds.name}</span>
+        <span>{ds.rows?.toLocaleString()} rows</span>
+        <span>{ds.n_columns} cols</span>
         <span>{fmtBytes(ds.size_bytes)}</span>
-        {ds.grain && <span className="dc-grain">{ds.grain}</span>}
       </div>
-      <button className="dc-toggle" onClick={() => setOpen((v) => !v)}>
-        {open ? '▾ Hide columns' : `▸ Show ${ds.columns?.length || 0} columns`}
-      </button>
-      {open && (
-        <div className="dc-table-wrap">
-          <table className="dc-table">
-            <thead>
-              <tr><th>Column</th><th>Kind</th><th>Description</th><th>Values</th></tr>
-            </thead>
-            <tbody>
-              {(ds.columns || []).map((c) => <ColumnRow key={c.name} col={c} />)}
-            </tbody>
-          </table>
-          {ds.n_columns > (ds.columns?.length || 0) && (
-            <p className="dc-muted dc-truncated">
-              Showing {ds.columns.length} of {ds.n_columns} columns.
-            </p>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -113,6 +187,7 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
   const [error, setError] = useState(null)
   const [spConnected, setSpConnected] = useState(null)
   const [folder, setFolder] = useState('')
+  const [open, setOpen] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -154,18 +229,20 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
   }
 
   const pull = async (ds) => {
-    // ds.path is relative to the catalogued root and may include subfolders;
-    // fall back to the bare name for catalogues built before paths existed.
-    const sru = `${cat.folder}/${ds.path || ds.name}`
     setPullingName(ds.name)
+    setError(null)
     try {
       const res = await fetch('/api/sharepoint/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverRelativeUrl: sru, destFolder: 'input_folder' }),
+        body: JSON.stringify({
+          serverRelativeUrl: `${cat.folder}/${ds.path || ds.name}`,
+          destFolder: 'input_folder',
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Pull failed')
+      setOpen(null)
       if (onPulled) onPulled()
     } catch (e) {
       setError(String(e.message || e))
@@ -183,7 +260,7 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
           className="dc-folder-input"
           value={folder}
           onChange={(e) => setFolder(e.target.value)}
-          placeholder="/sites/YourSite/Shared Documents/Folder"
+          placeholder="/sites/YourSite/Shared Documents"
           spellCheck={false}
         />
         <button className="btn-flat" onClick={() => build(false)} disabled={building || !folder}>
@@ -194,7 +271,7 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
             Rebuild all
           </button>
         )}
-        <span className="dc-built">Last built: {fmtWhen(cat?.built_at)}</span>
+        <span className="dc-built">Last built {fmtWhen(cat?.built_at)}</span>
       </div>
 
       {error && <div className="dc-banner dc-banner-error">{error}</div>}
@@ -206,40 +283,50 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
       )}
       {cat && cat.serviceConfigured === false && (
         <div className="dc-banner">
-          The describer isn’t configured, so datasets will be profiled but not described.
+          The describer isn’t configured, so datasets are profiled but not described.
         </div>
       )}
       {cat?.truncated && (
         <div className="dc-banner">
-          Stopped after the first 100 datasets — this folder has more. Point at a
-          narrower subfolder to catalogue the rest.
+          Stopped after the first 100 datasets — point at a narrower subfolder for the rest.
         </div>
       )}
       {building && (
         <div className="dc-banner">
-          Reading each dataset in full and describing it. Only changed files are
-          re-read, so this is a one-time cost per upload.
+          Reading each dataset and describing it. Only changed files are re-read.
         </div>
       )}
 
       <div className="dc-list">
         {loading ? (
-          <p className="dc-muted">Loading catalogue…</p>
+          <p className="dc-muted dc-pad">Loading…</p>
         ) : datasets.length === 0 ? (
           <div className="dc-empty">
             <p className="dc-empty-title">No catalogue yet</p>
             <p className="dc-muted">
               Point at a SharePoint folder above and build it. Each dataset gets a
-              description, a row grain, and a column profile — and becomes visible
+              plain-English description and a column profile — and becomes visible
               to Codex through the <code>vf_catalog</code> tool.
             </p>
           </div>
         ) : (
-          datasets.map((ds) => (
-            <DatasetCard key={ds.name} ds={ds} onPull={pull} pulling={pullingName === ds.name} />
-          ))
+          <>
+            <div className="dc-hint">Double-click a dataset to preview it.</div>
+            {datasets.map((ds) => (
+              <Row key={ds.path || ds.name} ds={ds} onOpen={setOpen} />
+            ))}
+          </>
         )}
       </div>
+
+      {open && (
+        <DatasetModal
+          ds={open}
+          onClose={() => setOpen(null)}
+          onPull={pull}
+          pulling={pullingName === open.name}
+        />
+      )}
     </div>
   )
 }
