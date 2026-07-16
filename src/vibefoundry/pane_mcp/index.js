@@ -93,7 +93,10 @@ const SESSION_INSTRUCTIONS = [
   "== BUILDING AN APP: AGENTS.md, and start from a template ==",
   "  - Read the project's AGENTS.md first and follow it exactly — the track",
   "    choice, the folder structure, run_app.sh/.bat, 'input is sacred'. Never",
-  "    stray from it or invent your own structure.",
+  "    stray from it or invent your own structure. It sits at the project root;",
+  "    if there isn't one the project was never scaffolded — call",
+  "    scaffold_project and RUN the commands it returns to create it, rather",
+  "    than proceeding with no rules or writing your own AGENTS.md.",
   "  - Always look for an existing template before writing anything: list the",
   "    project's templates/ folder (vf_request /api/files/tree). If one fits,",
   "    start from it.",
@@ -749,6 +752,7 @@ async function handle(msg) {
       // input_folder is empty or which templates are already pulled.
       var localFiles = [];
       var templates = [];
+      var hasAgents = false;
       try {
         var tree = await (await fetch(BACKEND + "/api/files/tree")).json();
         var walk = function (node, into) {
@@ -761,6 +765,10 @@ async function handle(msg) {
           if (top.name === "templates") (top.children || []).forEach(function (c) {
             if (c.isDirectory) templates.push(c.name);
           });
+          // "Follow AGENTS.md" is useless if there isn't one — it's created by
+          // scaffold_project, so an unscaffolded project has none, and the model
+          // silently has no rules to follow. Say which it is.
+          if (!top.isDirectory && top.name === "AGENTS.md") hasAgents = true;
         });
       } catch (e) { /* tree unavailable — fall back to the generic brief */ }
 
@@ -780,6 +788,10 @@ async function handle(msg) {
             "  Catalogue     : " + (catalogued
               ? catalogued + " SharePoint dataset(s) described — call vf_catalog"
               : "empty (build it from the Data Catalogue tab)"),
+            "  AGENTS.md     : " + (hasAgents
+              ? "present at the project root — READ IT before building anything"
+              : "MISSING. Call scaffold_project and RUN the commands it returns to "
+                + "create it, before building anything."),
             "",
             "DATA QUESTIONS — look locally first, then the catalogue:",
             "  1. Check the project's own data: read",
@@ -793,7 +805,10 @@ async function handle(msg) {
             "  Never invent filenames, columns or values. Never answer from memory.",
             "",
             "BUILDING AN APP — AGENTS.md, and never from scratch:",
-            "  - Read the project's AGENTS.md and follow it exactly. Do not stray.",
+            hasAgents
+              ? "  - Read the project's AGENTS.md and follow it exactly. Do not stray."
+              : "  - There is no AGENTS.md. Create one first via scaffold_project"
+                + " (run the commands it returns), then follow it exactly.",
             "  - Look in templates/ first" + (templates.length
               ? " (already there: " + templates.join(", ") + ")."
               : " (currently empty)."),
