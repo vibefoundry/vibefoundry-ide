@@ -4569,20 +4569,20 @@ body {
 .dc-row-error { cursor: default; border-color: #e5484d40; }
 .dc-row-error:hover { background: var(--color-bg-elevated); }
 
-.dc-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.dc-row-main { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+/* The description is the point — black and largest. The filename and the
+   numbers are supporting detail, so they stay grey and small. */
 .dc-row-title {
-  font-size: var(--font-size-base); font-weight: 600; color: var(--color-text);
+  font-size: 15px; font-weight: 600; color: var(--color-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.dc-row-sub {
-  font-size: var(--font-size-sm); color: var(--color-text-muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.dc-row-sep { color: var(--color-text-subtle); flex-shrink: 0; }
+.dc-row-sub { font-size: var(--font-size-sm); color: #e5484d; }
 .dc-row-meta {
   display: flex; align-items: center; gap: 14px; flex-shrink: 0;
   font-size: 12px; color: var(--color-text-subtle); white-space: nowrap;
 }
-.dc-row-file { color: var(--color-text-subtle); }
+.dc-row-file { color: var(--color-text-subtle); flex-shrink: 0; }
 
 /* ── Modal ── */
 .dc-modal-overlay {
@@ -4600,8 +4600,12 @@ body {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
   padding: 16px 18px; border-bottom: 1px solid var(--color-border); flex-shrink: 0;
 }
-.dc-modal-titles { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.dc-modal-head h3 { margin: 0; font-size: 17px; font-weight: 600; color: var(--color-text); }
+.dc-modal-titles {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  margin: 0; font-size: 18px; font-weight: 600; color: var(--color-text);
+}
+.dc-head-file { flex-shrink: 0; }
+.dc-head-sep { color: var(--color-text-subtle); font-weight: 400; flex-shrink: 0; }
 .dc-x {
   border: none; background: none; cursor: pointer; font-size: 22px; line-height: 1;
   color: var(--color-text-subtle); padding: 0 4px;
@@ -4609,15 +4613,13 @@ body {
 .dc-x:hover { color: var(--color-text); }
 
 .dc-modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; min-height: 0; }
-.dc-modal-summary { margin: 0 0 12px; font-size: var(--font-size-base); line-height: 1.6; color: var(--color-text-muted); }
 
 .dc-facts {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
-  font-size: var(--font-size-sm); color: var(--color-text-subtle);
-  padding-bottom: 14px; border-bottom: 1px solid var(--color-border);
+  font-size: 12px; color: var(--color-text-subtle);
+  padding-bottom: 12px; border-bottom: 1px solid var(--color-border);
 }
-.dc-facts strong { color: var(--color-text); font-weight: 600; }
-.dc-grain { flex-basis: 100%; font-style: italic; }
+.dc-facts strong { color: var(--color-text-subtle); font-weight: 600; }
 
 .dc-tabs { display: flex; gap: 4px; margin: 14px 0 10px; }
 .dc-tabs button {

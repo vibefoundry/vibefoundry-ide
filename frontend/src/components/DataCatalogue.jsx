@@ -64,20 +64,23 @@ const DatasetModal = ({ ds, onClose, onPull, pulling }) => {
     <div className="dc-modal-overlay" onClick={onClose}>
       <div className="dc-modal" onClick={(e) => e.stopPropagation()}>
         <div className="dc-modal-head">
-          <div className="dc-modal-titles">
-            <h3>{ds.title || ds.name}</h3>
-            <span className="dc-mono">{ds.path || ds.name}</span>
-          </div>
+          {/* Name + one short description, nothing else. The paragraph summary
+              and the row-grain line still exist in catalog.json — vf_catalog
+              feeds them to the model — but on screen, above a table of the
+              actual data, they were noise. */}
+          <h3 className="dc-modal-titles">
+            <span className="dc-mono dc-head-file">{ds.path || ds.name}</span>
+            <span className="dc-head-sep">—</span>
+            <span>{ds.title || ''}</span>
+          </h3>
           <button className="dc-x" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="dc-modal-body">
-          {ds.summary && <p className="dc-modal-summary">{ds.summary}</p>}
           <div className="dc-facts">
             <span><strong>{ds.rows?.toLocaleString()}</strong> rows</span>
             <span><strong>{ds.n_columns}</strong> columns</span>
             <span>{fmtBytes(ds.size_bytes)}</span>
-            {ds.grain && <span className="dc-grain">{ds.grain}</span>}
           </div>
 
           <div className="dc-tabs">
@@ -165,12 +168,15 @@ const Row = ({ ds, onOpen }) => {
   }
   return (
     <div className="dc-row" onDoubleClick={() => onOpen(ds)} title="Double-click to preview">
+      {/* name — description, and the numbers. Nothing else: the paragraph and
+          the row-grain line are still in catalog.json for vf_catalog, but on
+          screen they were noise. */}
       <div className="dc-row-main">
-        <span className="dc-row-title">{ds.title || ds.name}</span>
-        <span className="dc-row-sub">{ds.grain || ds.summary}</span>
+        <span className="dc-mono dc-row-file">{ds.path || ds.name}</span>
+        <span className="dc-row-sep">—</span>
+        <span className="dc-row-title">{ds.title || ''}</span>
       </div>
       <div className="dc-row-meta">
-        <span className="dc-mono dc-row-file">{ds.path || ds.name}</span>
         <span>{ds.rows?.toLocaleString()} rows</span>
         <span>{ds.n_columns} cols</span>
         <span>{fmtBytes(ds.size_bytes)}</span>
