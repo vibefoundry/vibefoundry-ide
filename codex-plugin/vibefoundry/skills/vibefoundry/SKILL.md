@@ -25,7 +25,32 @@ Pass the `project` argument when the user names a specific project folder to ope
 
 Once VibeFoundry is open, treat it as the user's working environment for the rest of the conversation. Their data and code live in the project folder, and this server is how you reach both.
 
-- **Any question about their data** — what exists, what's in it, which file to use, which column holds what — call **`vf_catalog` first**. It returns each dataset's description, what one row represents, row counts, and column profiles (distinct values for categoricals, min/max/mean for continuous, real date ranges for temporal). Use `dataset: "<name>"` for one dataset's full profile.
-- **Never guess** at filenames, columns or contents, and never answer from memory. If the catalogue is empty, say so and point the user at the Data Catalogue tab — don't invent an answer.
-- **`vf_request`** reaches any backend endpoint (files, previews, running scripts) when no dedicated tool fits.
-- **Follow the project's `AGENTS.md`** for structure: `input_folder/` is source data and is never edited, results go to `output_folder/{task}/`, and all code lives in `app_folder/scripts/{app}/`.
+`vf_request` reaches any backend endpoint (files, previews, running scripts) when no dedicated tool fits.
+
+### Data questions: local first, then the catalogue
+
+**1. Look in the project's own data first.** Read `app_folder/meta_data/input_metadata.txt` via `vf_request` — it's a generated digest of every file in `input_folder/` with columns, row counts and date columns. List `input_folder/` with `/api/files/tree`. If the answer is there, use it; the data is already local and needs no pulling.
+
+**2. If `input_folder/` can't answer it, assume the answer is in the Data Catalogue.** That means: no such dataset locally, missing columns, wrong time period, or the digest says *"No data files found"*. Call **`vf_catalog`** to search the connected SharePoint library — it returns each dataset's description, what one row represents (the grain), row counts, and column profiles (distinct values for categoricals, min/max/mean for continuous, real date ranges for temporal). Use `dataset: "<name>"` for one dataset's full column profile.
+
+**3. Pull before analysing.** Once you've picked a dataset:
+
+```
+vf_request POST /api/sharepoint/download
+  { serverRelativeUrl: "<catalogue folder>/<path>", destFolder: "input_folder" }
+```
+
+**Never invent** filenames, columns or values at any step, and never answer from memory. If neither local data nor the catalogue can answer, say so and point the user at the Data Catalogue tab.
+
+### Building an app: AGENTS.md, and never from scratch
+
+- **Read the project's `AGENTS.md` first and follow it exactly** — the track choice, folder structure, `run_app.sh`/`.bat`, and "input is sacred". Never stray from it or invent your own structure.
+- **Always look for an existing template first.** List the project's `templates/` folder (`vf_request /api/files/tree`). If one fits, start from it.
+- **If `templates/` has nothing suitable, pull one from the VibeFoundry template library** rather than starting from scratch:
+
+```
+vf_request GET  /api/templates/catalog          # what's available
+vf_request POST /api/templates/download {id}    # lands in templates/
+```
+
+- Only write an app from scratch if the library genuinely has nothing close.

@@ -63,26 +63,49 @@ const SESSION_INSTRUCTIONS = [
   "reach both. Prefer these tools over guessing, and never answer a question",
   "about the user's data from memory or assumption.",
   "",
-  "Project layout (see the project's AGENTS.md, which is authoritative):",
+  "Project layout — the project's AGENTS.md is authoritative, follow it exactly:",
   "  input_folder/          source data — SACRED, never edit or overwrite",
   "  output_folder/{task}/  where results are written",
   "  app_folder/scripts/{app}/  ALL code lives here, one folder per app",
-  "  app_folder/meta_data/  generated descriptions of the available data",
+  "  app_folder/meta_data/  generated digests of what's in input/output",
+  "  templates/             templates already pulled into this project",
   "",
-  "How to work with the data:",
-  "  - vf_catalog FIRST for any question about what data exists or what's in it.",
-  "    It returns each dataset's description, what one row represents (the grain),",
-  "    row counts, and per-column profiles — distinct values for categoricals,",
-  "    min/max/mean for continuous, real date ranges for temporal columns. That",
-  "    is how you pick the right file and the right columns before reading a byte.",
-  "  - vf_catalog with `dataset` gives the full column profile for one dataset.",
-  "  - The catalogue covers the connected SharePoint library. To analyse one of",
-  "    those datasets, pull it into input_folder first (see the tool's hint).",
-  "  - vf_request reaches any backend endpoint (files, previews, running scripts)",
-  "    when no dedicated tool fits.",
+  "== A DATA QUESTION: look locally first, then the catalogue ==",
+  "  1. Start with the project's own data. Read",
+  "     app_folder/meta_data/input_metadata.txt (a digest of every file in",
+  "     input_folder: columns, row counts, date columns) via vf_request, and list",
+  "     input_folder with /api/files/tree. If the answer is there, use it — the",
+  "     data is already local and needs no pulling.",
+  "  2. If input_folder can't answer it — no such dataset, missing columns, wrong",
+  "     period, digest says 'No data files found' — then assume the answer lives",
+  "     in the Data Catalogue. Call vf_catalog to search the connected SharePoint",
+  "     library: it gives each dataset's description, what one row represents,",
+  "     row counts and column profiles (distinct values for categoricals,",
+  "     min/max/mean for continuous, real date ranges for temporal). Use",
+  "     vf_catalog with `dataset` for one dataset's full profile.",
+  "  3. Having picked a dataset, pull it into input_folder before analysing it:",
+  "     vf_request POST /api/sharepoint/download",
+  "     {serverRelativeUrl: '<catalogue folder>/<path>', destFolder: 'input_folder'}",
+  "  Never invent filenames, columns or values at any step. If neither local data",
+  "  nor the catalogue can answer, say so and point the user at the Data",
+  "  Catalogue tab.",
   "",
-  "If the catalogue is empty, say so and point the user at the Data Catalogue tab",
-  "rather than guessing at their data.",
+  "== BUILDING AN APP: AGENTS.md, and start from a template ==",
+  "  - Read the project's AGENTS.md first and follow it exactly — the track",
+  "    choice, the folder structure, run_app.sh/.bat, 'input is sacred'. Never",
+  "    stray from it or invent your own structure.",
+  "  - Always look for an existing template before writing anything: list the",
+  "    project's templates/ folder (vf_request /api/files/tree). If one fits,",
+  "    start from it.",
+  "  - If templates/ has nothing suitable, pull one from the VibeFoundry template",
+  "    library rather than starting from scratch:",
+  "      vf_request GET  /api/templates/catalog        (what's available)",
+  "      vf_request POST /api/templates/download {id}  (into templates/)",
+  "    Then use it as the starting point.",
+  "  - Only write an app from scratch if the library genuinely has nothing close.",
+  "",
+  "vf_request reaches any backend endpoint (files, previews, running scripts)",
+  "when no dedicated tool fits.",
 ].join("\n");
 
 // --- Backend supervision -------------------------------------------------------
@@ -721,27 +744,62 @@ async function handle(msg) {
         catalogued = ((cat && cat.datasets) || []).length;
       } catch (e) { /* no catalogue yet */ }
 
+      // Report what's ACTUALLY there rather than describing the layout in the
+      // abstract — the model shouldn't have to go looking to learn whether
+      // input_folder is empty or which templates are already pulled.
+      var localFiles = [];
+      var templates = [];
+      try {
+        var tree = await (await fetch(BACKEND + "/api/files/tree")).json();
+        var walk = function (node, into) {
+          (node.children || []).forEach(function (c) {
+            if (!c.isDirectory) into.push(c.name);
+          });
+        };
+        ((tree.tree && tree.tree.children) || []).forEach(function (top) {
+          if (top.name === "input_folder") walk(top, localFiles);
+          if (top.name === "templates") (top.children || []).forEach(function (c) {
+            if (c.isDirectory) templates.push(c.name);
+          });
+        });
+      } catch (e) { /* tree unavailable — fall back to the generic brief */ }
+
       var brief = backend.ok
         ? [
             message,
             "",
             "VibeFoundry is now the user's working environment for this",
             "conversation. Treat their data and code as living here, and work",
-            "through this server rather than assuming or improvising:",
+            "through this server rather than assuming or improvising.",
             "",
             folder ? "  Project folder: " + folder : "  No project folder selected yet.",
-            "  Data in:  input_folder/ (never edit it)  ->  results to output_folder/{task}/",
-            "  Code in:  app_folder/scripts/{app}/  (all of it, one folder per app)",
-            catalogued
-              ? "  Catalogue: " + catalogued + " dataset(s) described and ready — call vf_catalog"
-              : "  Catalogue: empty. Build it from the Data Catalogue tab before answering data questions.",
+            "  input_folder/ : " + (localFiles.length
+              ? localFiles.length + " file(s) — " + localFiles.slice(0, 6).join(", ")
+              : "empty"),
+            "  templates/    : " + (templates.length ? templates.join(", ") : "none pulled yet"),
+            "  Catalogue     : " + (catalogued
+              ? catalogued + " SharePoint dataset(s) described — call vf_catalog"
+              : "empty (build it from the Data Catalogue tab)"),
             "",
-            "For ANY question about their data — what exists, what's in it, which",
-            "file to use — call vf_catalog FIRST. It gives you each dataset's",
-            "purpose, what one row means, and its column profiles. Do not guess at",
-            "filenames, columns or contents, and do not answer from memory. Use",
-            "vf_request for backend endpoints with no dedicated tool. Follow the",
-            "project's AGENTS.md for how to structure anything you build.",
+            "DATA QUESTIONS — look locally first, then the catalogue:",
+            "  1. Check the project's own data: read",
+            "     app_folder/meta_data/input_metadata.txt (digest of input_folder:",
+            "     columns, row counts, dates) via vf_request. If it answers the",
+            "     question, use it — nothing to pull.",
+            "  2. If input_folder can't answer it, assume the answer is in the Data",
+            "     Catalogue: call vf_catalog to find the right SharePoint dataset,",
+            "     then pull it in via POST /api/sharepoint/download",
+            "     {serverRelativeUrl, destFolder:'input_folder'}.",
+            "  Never invent filenames, columns or values. Never answer from memory.",
+            "",
+            "BUILDING AN APP — AGENTS.md, and never from scratch:",
+            "  - Read the project's AGENTS.md and follow it exactly. Do not stray.",
+            "  - Look in templates/ first" + (templates.length
+              ? " (already there: " + templates.join(", ") + ")."
+              : " (currently empty)."),
+            "  - If nothing fits, pull one from the library before writing code:",
+            "    GET /api/templates/catalog, then POST /api/templates/download.",
+            "    Only build from scratch if the library has nothing close.",
           ].join("\n")
         : message;
 
