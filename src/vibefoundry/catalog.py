@@ -97,7 +97,40 @@ async def list_datasets(
                         continue
                     queue.append((f.get("ServerRelativeUrl"), depth + 1))
 
+    found = await _expand_workbooks(client, host, site, token, found)
     return found, truncated
+
+
+async def _expand_workbooks(
+    client: httpx.AsyncClient, host: str, site: str, token: str, files: list[dict]
+) -> list[dict]:
+    """Turn each multi-sheet workbook into one dataset per sheet.
+
+    A workbook is a container, not a table: an 11-tab P&L whose first tab is a
+    title page would otherwise be catalogued as "a cover page", with the real
+    data invisible. Single-sheet workbooks stay as they are — no point making
+    'book.xlsx :: Sheet1' out of a file that is just a table.
+    """
+    out: list[dict] = []
+    for f in files:
+        if Path(f["name"]).suffix.lower() not in (".xlsx", ".xls"):
+            out.append(f)
+            continue
+        try:
+            raw = await fetch_bytes(client, host, site, token, f["serverRelativeUrl"])
+            sheets = excel_sheets(raw)
+        except Exception:
+            out.append(f)  # unreadable — let the profile step report it properly
+            continue
+        if len(sheets) <= 1:
+            out.append(f)
+            continue
+        for s in sheets:
+            e = dict(f)
+            e["sheet"] = s
+            e["path"] = f.get("path", f["name"]) + SHEET_SEP + s
+            out.append(e)
+    return out
 
 
 def config_path() -> Path:
@@ -187,13 +220,30 @@ def profile_frame(df: pl.DataFrame, name: str, size: int) -> dict:
     }
 
 
-def _read_bytes(name: str, raw: bytes) -> pl.DataFrame:
+SHEET_SEP = " :: "  # dataset path for one sheet: "book.xlsx :: Revenue"
+
+
+def excel_sheets(raw: bytes) -> list[str]:
+    """Sheet names, in workbook order."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True)
+    try:
+        return list(wb.sheetnames)
+    finally:
+        wb.close()
+
+
+def _read_bytes(name: str, raw: bytes, sheet: Optional[str] = None) -> pl.DataFrame:
     suffix = Path(name).suffix.lower()
     buf = io.BytesIO(raw)
     if suffix == ".parquet":
         return pl.read_parquet(buf)
     if suffix in (".xlsx", ".xls"):
-        return pl.read_excel(buf)
+        # Without sheet_name polars reads only the FIRST sheet. A workbook whose
+        # first tab is a title page then gets catalogued as "a cover page" while
+        # the actual data sits invisible on the other ten tabs. Each sheet is its
+        # own table, so each is catalogued as its own dataset.
+        return pl.read_excel(buf, sheet_name=sheet) if sheet else pl.read_excel(buf)
     if suffix == ".json":
         return pl.read_json(buf)
     sep = "\t" if suffix == ".tsv" else ","
@@ -204,11 +254,9 @@ def _read_bytes(name: str, raw: bytes) -> pl.DataFrame:
     return pl.read_csv(buf, separator=sep, infer_schema_length=10000, try_parse_dates=True)
 
 
-async def fetch_and_profile(
-    client: httpx.AsyncClient, host: str, site: str, token: str, f: dict
-) -> dict:
-    """Stream one dataset out of SharePoint and profile it."""
-    sru = f["serverRelativeUrl"]
+async def fetch_bytes(
+    client: httpx.AsyncClient, host: str, site: str, token: str, sru: str
+) -> bytes:
     url = (
         f"https://{host}{site}/_api/web/GetFileByServerRelativeUrl"
         f"('{quote(sru, safe='/')}')/$value"
@@ -222,13 +270,24 @@ async def fetch_and_profile(
             raise RuntimeError(f"SharePoint read failed ({r.status_code}): {body[:200]!r}")
         async for chunk in r.aiter_bytes(1 << 20):
             buf.extend(chunk)
-    df = _read_bytes(f["name"], bytes(buf))
-    return profile_frame(df, f["name"], len(buf))
+    return bytes(buf)
+
+
+async def fetch_and_profile(
+    client: httpx.AsyncClient, host: str, site: str, token: str, f: dict
+) -> dict:
+    """Stream one dataset out of SharePoint and profile it."""
+    raw = await fetch_bytes(client, host, site, token, f["serverRelativeUrl"])
+    df = _read_bytes(f["name"], raw, f.get("sheet"))
+    prof = profile_frame(df, f["name"], len(raw))
+    if f.get("sheet"):
+        prof["sheet"] = f["sheet"]
+    return prof
 
 
 async def fetch_preview(
     client: httpx.AsyncClient, host: str, site: str, token: str,
-    sru: str, name: str, rows: int = 100,
+    sru: str, name: str, rows: int = 100, sheet: Optional[str] = None,
 ) -> dict:
     """First `rows` of a dataset, fetched on demand.
 
@@ -267,7 +326,7 @@ async def fetch_preview(
         cut = raw.rfind(b"\n")
         if cut > 0:
             raw = raw[:cut]
-    df = _read_bytes(name, raw).head(rows)
+    df = _read_bytes(name, raw, sheet).head(rows)
     return {
         "columns": df.columns,
         "rows": [[_cell(v) for v in row] for row in df.rows()],
@@ -313,6 +372,8 @@ def merge_entry(profile: dict, described: dict, fp: str) -> dict:
         # Relative to the catalogued root. Pull rebuilds the SharePoint URL from
         # this, so dropping it breaks every dataset in a subfolder.
         "path": profile.get("path") or profile["name"],
+        # Set when this entry is one sheet of a multi-sheet workbook.
+        "sheet": profile.get("sheet"),
         "size_bytes": profile["size_bytes"],
         "rows": profile["rows"],
         "n_columns": profile["n_columns"],

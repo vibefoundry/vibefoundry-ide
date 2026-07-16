@@ -69,14 +69,15 @@ const DatasetModal = ({ ds, onClose, onPull, pulling }) => {
               feeds them to the model — but on screen, above a table of the
               actual data, they were noise. */}
           <h3 className="dc-modal-titles">
-            <span className="dc-mono dc-head-file">{ds.path || ds.name}</span>
+            <span className="dc-head-file">{ds.path || ds.name}</span>
             <span className="dc-head-sep">—</span>
-            <span>{ds.title || ''}</span>
+            <span className="dc-head-desc">{ds.title || ''}</span>
           </h3>
           <button className="dc-x" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="dc-modal-body">
+          {ds.summary && <p className="dc-modal-summary">{ds.summary}</p>}
           <div className="dc-facts">
             <span><strong>{ds.rows?.toLocaleString()}</strong> rows</span>
             <span><strong>{ds.n_columns}</strong> columns</span>
@@ -172,7 +173,7 @@ const Row = ({ ds, onOpen }) => {
           the row-grain line are still in catalog.json for vf_catalog, but on
           screen they were noise. */}
       <div className="dc-row-main">
-        <span className="dc-mono dc-row-file">{ds.path || ds.name}</span>
+        <span className="dc-row-file">{ds.path || ds.name}</span>
         <span className="dc-row-sep">—</span>
         <span className="dc-row-title">{ds.title || ''}</span>
       </div>
@@ -242,7 +243,9 @@ const DataCatalogue = ({ onPulled, onConnect }) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          serverRelativeUrl: `${cat.folder}/${ds.path || ds.name}`,
+          // A sheet's path is "book.xlsx :: Revenue"; the file to pull is the
+          // workbook itself — the whole thing, sheets included.
+          serverRelativeUrl: `${cat.folder}/${(ds.path || ds.name).split(' :: ')[0]}`,
           destFolder: 'input_folder',
         }),
       })

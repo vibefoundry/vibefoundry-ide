@@ -2561,11 +2561,14 @@ async def catalog_preview(path: str, rows: int = 100):
         raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
     token = await _sp_access_token()
 
-    sru = f"{folder}/{path}"
+    # `path` may be "book.xlsx :: Revenue" — the file on SharePoint is the part
+    # before the separator; the rest names a sheet inside it.
+    sru = f"{folder}/{path.split(_cat.SHEET_SEP)[0]}"
     async with httpx.AsyncClient(timeout=300) as client:
         try:
             preview = await _cat.fetch_preview(
-                client, host, site, token, sru, entry["name"], min(max(rows, 1), 500)
+                client, host, site, token, sru, entry["name"],
+                min(max(rows, 1), 500), entry.get("sheet"),
             )
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}")
