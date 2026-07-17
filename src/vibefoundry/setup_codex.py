@@ -1,20 +1,34 @@
 """
-Register the VibeFoundry pane MCP with the Codex / ChatGPT desktop app.
+Register the VibeFoundry pane MCP and skill with the Codex / ChatGPT desktop app.
 
 Adds a `[mcp_servers.vibefoundry]` stdio entry to ~/.codex/config.toml that
 points `node` at the pane MCP shipped inside this package (pane_mcp/index.js).
-The desktop app reads that file on startup, so after running this the user
-restarts the app and can say "open VibeFoundry" to get the pane.
+Also installs a user-wide `vibefoundry` skill into ~/.agents/skills so the user
+can invoke it directly with `$vibefoundry`.
 
 Installed as the console command `vibefoundry-setup-codex` (see pyproject.toml).
-Idempotent: if the entry already exists it does nothing.
+Idempotent: re-running updates the skill and leaves existing MCP config in place.
 """
 
 import os
+import shutil
 
 
-def main():
-    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+def _install_skill(pkg_dir):
+    src = os.path.join(pkg_dir, "codex_skill", "vibefoundry", "SKILL.md")
+    if not os.path.exists(src):
+        print(f"Error: VibeFoundry skill not found at {src}")
+        print("Reinstall vibefoundry: pip install --upgrade vibefoundry")
+        return 1
+
+    skill_dir = os.path.expanduser(os.path.join("~", ".agents", "skills", "vibefoundry"))
+    os.makedirs(skill_dir, exist_ok=True)
+    shutil.copyfile(src, os.path.join(skill_dir, "SKILL.md"))
+    print("Installed VibeFoundry skill at ~/.agents/skills/vibefoundry/SKILL.md.")
+    return 0
+
+
+def _register_mcp(pkg_dir):
     # Node accepts forward slashes on every OS, and they need no TOML escaping.
     node_path = os.path.join(pkg_dir, "pane_mcp", "index.js").replace("\\", "/")
 
@@ -34,7 +48,6 @@ def main():
 
     if "[mcp_servers.vibefoundry]" in existing:
         print("VibeFoundry pane MCP is already registered in ~/.codex/config.toml.")
-        print("Restart the ChatGPT / Codex desktop app, then say 'open VibeFoundry'.")
         return 0
 
     block = (
@@ -47,7 +60,16 @@ def main():
         f.write(sep + "\n" + block)
 
     print("Registered VibeFoundry pane MCP in ~/.codex/config.toml.")
-    print("Now RESTART the ChatGPT / Codex desktop app, then say 'open VibeFoundry'.")
+    return 0
+
+
+def main():
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    skill_status = _install_skill(pkg_dir)
+    mcp_status = _register_mcp(pkg_dir)
+    if skill_status or mcp_status:
+        return 1
+    print("Restart the ChatGPT / Codex desktop app, then use '$vibefoundry'.")
     return 0
 
 
