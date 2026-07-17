@@ -29,6 +29,11 @@ Recipients do not run terminal commands or an OS installer to install the plugin
 
 ## Git marketplace distribution
 
-This folder can also be used as a Git-backed marketplace for developer or managed rollout. Codex supports Git repository marketplace sources and sparse paths; the marketplace entry itself remains local and resolves `./plugins/vibefoundry` relative to this directory.
+The `codex-plugin` branch can be registered directly as a Git-backed marketplace. Its root `.agents/plugins/marketplace.json` points to this folder's plugin payload. Use both sparse paths so Codex checks out the root manifest and the plugin:
+
+```text
+codex plugin marketplace add https://github.com/vibefoundry/vibefoundry-ide.git --ref codex-plugin --sparse .agents/plugins --sparse codex_plugin
+codex plugin add vibefoundry@vibefoundry
+```
 
 A `codex://plugins/install/?marketplace=vibefoundry` link works only after Codex already knows the `vibefoundry` marketplace. Codex does not document a deep link that silently registers an arbitrary hosted `marketplace.json` URL.
