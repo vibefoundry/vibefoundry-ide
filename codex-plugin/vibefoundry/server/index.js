@@ -485,12 +485,24 @@ const TOOL = {
     "\"open the IDE\", \"open my data workspace\", \"show VibeFoundry\", " +
     "\"start the data pane\". It auto-starts the local backend if needed and " +
     "renders the full VibeFoundry UI (file browser, data preview, scripts) as " +
-    "a fullscreen pane. It always uses Codex's active project root and starts " +
-    "a fresh backend for that project. Match generously through misspellings, " +
+    "a fullscreen pane. Pass the current Codex task's working directory as " +
+    "`projectRoot`; the user should never need to provide it. It starts a fresh " +
+    "backend for that project. Match generously through misspellings, " +
     "transpositions, spacing, and abbreviations — e.g. \"open vfoundry\", " +
     "\"open videfoundry\", \"open vibe foundry\", \"open vibefoundy\", " +
     "\"open VF\" all refer to VibeFoundry and MUST trigger this tool.",
-  inputSchema: { type: "object", properties: {}, required: [] },
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectRoot: {
+        type: "string",
+        description:
+          "Absolute path to the current Codex task's working directory. Supply " +
+          "this automatically from task context; never ask the user for it.",
+      },
+    },
+    required: ["projectRoot"],
+  },
   _meta: TOOL_META,
 };
 
@@ -671,29 +683,42 @@ function handleClientResponse(msg) {
   return true;
 }
 
-async function activeProjectRoot() {
-  var result = await requestClient("roots/list", {}, 5000);
-  var roots = (result && result.roots) || [];
-  if (!roots.length) {
-    throw new Error("Codex did not provide an active project root");
+async function activeProjectRoot(projectRoot) {
+  if (projectRoot) {
+    return resolveProjectRoot(projectRoot, "Codex's current working directory");
   }
 
-  // Codex presents the active project root first. Resolve it on every launch so
-  // a long-lived MCP process follows the project currently open in the client.
-  var root = roots[0];
-  if (!root.uri || !String(root.uri).startsWith("file:")) {
-    throw new Error("Codex's active project root is not a local filesystem folder");
+  try {
+    var result = await requestClient("roots/list", {}, 5000);
+    var roots = (result && result.roots) || [];
+    if (roots.length) {
+      var root = roots[0];
+      if (!root.uri || !String(root.uri).startsWith("file:")) {
+        throw new Error("Codex's active project root is not a local filesystem folder");
+      }
+      return resolveProjectRoot(fileURLToPath(root.uri), "Codex's active project root");
+    }
+  } catch (e) {
+    if (!String(e && e.message).includes("timed out")) {
+      throw e;
+    }
   }
 
-  var project = fileURLToPath(root.uri);
+  throw new Error(
+    "Codex did not provide the current task root. Call open_vibefoundry with " +
+    "projectRoot set to the current task's working directory."
+  );
+}
+
+function resolveProjectRoot(project, label) {
   var stat;
   try {
     stat = fs.statSync(project);
   } catch (e) {
-    throw new Error("Codex's active project root does not exist: " + project);
+    throw new Error(label + " does not exist: " + project);
   }
   if (!stat.isDirectory()) {
-    throw new Error("Codex's active project root is not a directory: " + project);
+    throw new Error(label + " is not a directory: " + project);
   }
   return path.resolve(project);
 }
@@ -756,7 +781,9 @@ async function handle(msg) {
       if (name !== TOOL.name) {
         return error(id, -32602, "Unknown tool: " + name);
       }
-      var project = await activeProjectRoot();
+      var project = await activeProjectRoot(
+        params.arguments && params.arguments.projectRoot
+      );
       var backend = await queueFreshBackend(project);
       var message = backend.ok
         ? "VibeFoundry backend started."

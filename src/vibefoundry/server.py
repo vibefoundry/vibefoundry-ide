@@ -2271,6 +2271,18 @@ from urllib.parse import quote as _sp_quote, urlencode as _sp_urlencode
 SHAREPOINT_CLIENT_ID = "99c7eaae-457d-4d7a-be97-5674fe6d29c5"
 SHAREPOINT_AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0"
 
+# Temporary demo fallback: when a user has not connected Microsoft SSO, the
+# SharePoint browser reads from this anonymous "Anyone with the link" folder.
+# Remove this constant (or set VF_PUBLIC_SHAREPOINT_LINK="") to return to
+# delegated-only SharePoint access.
+PUBLIC_SHAREPOINT_LINK = os.environ.get(
+    "VF_PUBLIC_SHAREPOINT_LINK",
+    "https://netorgft18929182.sharepoint.com/:f:/s/VfSharepoint/IgBKpR7r6YLnT4ibvPQcKjOXAcHzewfyp18-T3_hrWIIrmQ",
+).strip()
+PUBLIC_SHAREPOINT_HOST = "netorgft18929182.sharepoint.com"
+PUBLIC_SHAREPOINT_SITE = "/sites/VfSharepoint"
+PUBLIC_SHAREPOINT_ROOT = "/sites/VfSharepoint/Shared Documents/Test_Folder"
+
 
 def _sp_redirect_uri() -> str:
     """Loopback redirect URI, built from the port we actually bound.
@@ -2422,26 +2434,83 @@ async def _sp_access_token() -> str:
     return cfg["access_token"]
 
 
+def _sp_public_available() -> bool:
+    return bool(PUBLIC_SHAREPOINT_LINK)
+
+
+def _sp_public_headers() -> dict:
+    return {"Accept": "application/json;odata=nometadata"}
+
+
+def _sp_public_base(rel: str) -> str:
+    encoded = _sp_quote(rel.replace("'", "''"), safe="/")
+    return (
+        f"https://{PUBLIC_SHAREPOINT_HOST}{PUBLIC_SHAREPOINT_SITE}"
+        f"/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
+    )
+
+
+async def _sp_public_client(timeout: int = 30) -> httpx.AsyncClient:
+    client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+    try:
+        resp = await client.get(PUBLIC_SHAREPOINT_LINK)
+        if resp.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Public SharePoint link failed: {resp.text[:200]}",
+            )
+        return client
+    except Exception:
+        await client.aclose()
+        raise
+
+
+def _sp_has_delegated_token(cfg: dict) -> bool:
+    return bool(cfg.get("refresh_token"))
+
+
 @app.get("/api/sharepoint/status")
 async def sharepoint_status():
     cfg = _sp_read()
-    return {"connected": bool(cfg.get("refresh_token")), "host": cfg.get("host"), "site": cfg.get("site")}
+    if _sp_has_delegated_token(cfg):
+        return {"connected": True, "host": cfg.get("host"), "site": cfg.get("site")}
+    if _sp_public_available():
+        return {
+            "connected": True,
+            "host": PUBLIC_SHAREPOINT_HOST,
+            "site": PUBLIC_SHAREPOINT_SITE,
+            "publicDemo": True,
+        }
+    return {"connected": False, "host": cfg.get("host"), "site": cfg.get("site")}
 
 
 @app.get("/api/sharepoint/list")
 async def sharepoint_list(folder: str = ""):
     cfg = _sp_read()
     host, site = cfg.get("host"), cfg.get("site")
-    if not host or not site:
-        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
-    token = await _sp_access_token()
-    rel = folder.strip() or f"{site}/Shared Documents"
-    encoded = _sp_quote(rel.replace("'", "''"), safe="/")
-    base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        f_resp = await client.get(f"{base}/Files", headers=headers)
-        d_resp = await client.get(f"{base}/Folders", headers=headers)
+    public_mode = not _sp_has_delegated_token(cfg) and _sp_public_available()
+    if public_mode:
+        host, site = PUBLIC_SHAREPOINT_HOST, PUBLIC_SHAREPOINT_SITE
+        rel = folder.strip() or PUBLIC_SHAREPOINT_ROOT
+        base = _sp_public_base(rel)
+        headers = _sp_public_headers()
+        client = await _sp_public_client(timeout=30)
+        try:
+            f_resp = await client.get(f"{base}/Files", headers=headers)
+            d_resp = await client.get(f"{base}/Folders", headers=headers)
+        finally:
+            await client.aclose()
+    else:
+        if not host or not site:
+            raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+        token = await _sp_access_token()
+        rel = folder.strip() or f"{site}/Shared Documents"
+        encoded = _sp_quote(rel.replace("'", "''"), safe="/")
+        base = f"https://{host}{site}/_api/web/GetFolderByServerRelativeUrl('{encoded}')"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json;odata=nometadata"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            f_resp = await client.get(f"{base}/Files", headers=headers)
+            d_resp = await client.get(f"{base}/Folders", headers=headers)
     if f_resp.status_code != 200:
         raise HTTPException(status_code=f_resp.status_code, detail=f"SharePoint list failed: {f_resp.text[:300]}")
     files = [
@@ -2455,7 +2524,7 @@ async def sharepoint_list(folder: str = ""):
             for x in d_resp.json().get("value", [])
             if x.get("Name") and x["Name"] != "Forms"
         ]
-    return {"current": rel, "files": files, "folders": folders}
+    return {"current": rel, "files": files, "folders": folders, "publicDemo": public_mode}
 
 
 class SharePointDownloadRequest(BaseModel):
@@ -2469,9 +2538,15 @@ async def sharepoint_download(request: SharePointDownloadRequest):
         raise HTTPException(status_code=400, detail="No project folder selected")
     cfg = _sp_read()
     host, site = cfg.get("host"), cfg.get("site")
-    if not host or not site:
-        raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
-    token = await _sp_access_token()
+    public_mode = not _sp_has_delegated_token(cfg) and _sp_public_available()
+    if public_mode:
+        host, site = PUBLIC_SHAREPOINT_HOST, PUBLIC_SHAREPOINT_SITE
+        headers = {}
+    else:
+        if not host or not site:
+            raise HTTPException(status_code=400, detail="SharePoint host/site not configured")
+        token = await _sp_access_token()
+        headers = {"Authorization": f"Bearer {token}"}
 
     name = request.serverRelativeUrl.rstrip("/").split("/")[-1]
     base = request.destFolder.strip("/")
@@ -2487,8 +2562,8 @@ async def sharepoint_download(request: SharePointDownloadRequest):
 
     encoded = _sp_quote(request.serverRelativeUrl.replace("'", "''"), safe="/")
     url = f"https://{host}{site}/_api/web/GetFileByServerRelativeUrl('{encoded}')/$value"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=300) as client:
+    client = await _sp_public_client(timeout=300) if public_mode else httpx.AsyncClient(timeout=300)
+    try:
         async with client.stream("GET", url, headers=headers) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
@@ -2496,6 +2571,8 @@ async def sharepoint_download(request: SharePointDownloadRequest):
             with open(dest_path, "wb") as fh:
                 async for chunk in resp.aiter_bytes(65536):
                     fh.write(chunk)
+    finally:
+        await client.aclose()
 
     generate_metadata(state.project_folder)
     return {"success": True, "path": str(dest_path.relative_to(state.project_folder))}

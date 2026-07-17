@@ -123,6 +123,9 @@ const tools = await call("tools/list", {});
 const names = ok(tools) ? tools.result.tools.map((t) => t.name) : [];
 check("tools/list exposes all three", ["open_vibefoundry", "vf_request", "vf_catalog"].every((n) => names.includes(n)),
   names.join(", ") || why(tools));
+const openTool = ok(tools) && tools.result.tools.find((t) => t.name === "open_vibefoundry");
+check("open tool requires Codex's current task root",
+  openTool && openTool.inputSchema.required?.includes("projectRoot"));
 
 const rlist = await call("resources/list", {});
 check("resources/list", ok(rlist) && rlist.result.resources.length > 0, ok(rlist) ? "" : why(rlist));
@@ -168,6 +171,16 @@ check("the conversation keeps one OS-assigned backend port",
   Number.isInteger(firstPort) && firstPort > 0 && firstPort === secondPort,
   `${firstPort || "?"} -> ${secondPort || "?"}`);
 check("each open re-reads Codex's active project root", rootRequests === 2, String(rootRequests));
+
+const explicitOpen = await call("tools/call", {
+  name: "open_vibefoundry",
+  arguments: { projectRoot: PROJECT },
+});
+check("explicit task root bypasses host root discovery",
+  ok(explicitOpen) &&
+    explicitOpen.result.structuredContent.projectFolder === PROJECT &&
+    rootRequests === 2,
+  ok(explicitOpen) ? JSON.stringify(explicitOpen.result.structuredContent) : why(explicitOpen));
 
 if (stderr.trim()) console.log("\nstderr:\n" + stderr.slice(0, 500));
 child.kill();
