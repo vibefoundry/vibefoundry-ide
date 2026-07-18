@@ -1,0 +1,18 @@
+{
+  "name": "vibefoundry",
+  "version": "0.1.1",
+  "description": "Open the VibeFoundry data-science IDE as an in-app pane in Claude Code and work through it (data catalogue, templates, scripts) via the local Python runtime.",
+  "author": {
+    "name": "VibeFoundry",
+    "url": "https://vibefoundry.ai"
+  },
+  "homepage": "https://vibefoundry.ai",
+  "repository": "https://github.com/vibefoundry/vibefoundry-ide",
+  "license": "MIT",
+  "keywords": [
+    "data science",
+    "IDE",
+    "analytics",
+    "scaffolding"
+  ]
+}

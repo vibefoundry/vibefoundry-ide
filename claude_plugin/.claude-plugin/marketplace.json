@@ -1,0 +1,20 @@
+{
+  "name": "vibefoundry",
+  "owner": {
+    "name": "VibeFoundry",
+    "email": "angelo@vibefoundry.ai",
+    "url": "https://vibefoundry.ai"
+  },
+  "metadata": {
+    "description": "VibeFoundry — the data-science IDE, launched as an in-app pane in Claude Code.",
+    "version": "0.1.1"
+  },
+  "plugins": [
+    {
+      "name": "vibefoundry",
+      "source": "./plugins/vibefoundry",
+      "description": "Open the VibeFoundry data-science IDE as an in-app pane and work through it (data catalogue, templates, scripts).",
+      "category": "productivity"
+    }
+  ]
+}
