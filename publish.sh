@@ -35,8 +35,9 @@ cd ..
 # ships as package data (used by the Codex desktop-app plugin).
 echo "Packaging pane MCP..."
 mkdir -p src/vibefoundry/pane_mcp/pane
-cp codex-plugin/vibefoundry/server/index.js src/vibefoundry/pane_mcp/index.js
-cp codex-plugin/vibefoundry/server/pane/index.pane.html src/vibefoundry/pane_mcp/pane/index.pane.html
+cp codex_plugin/plugins/vibefoundry/server/index.js src/vibefoundry/pane_mcp/index.js
+cp codex_plugin/plugins/vibefoundry/server/install-tools.js src/vibefoundry/pane_mcp/install-tools.js
+cp codex_plugin/plugins/vibefoundry/server/pane/index.pane.html src/vibefoundry/pane_mcp/pane/index.pane.html
 
 # Build Python package
 echo "Building Python package..."

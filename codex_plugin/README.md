@@ -1,8 +1,22 @@
-# VibeFoundry Codex plugin
+# VibeFoundry Codex plugin bridge
 
-This directory is the complete VibeFoundry marketplace root. Its catalog is at `.agents/plugins/marketplace.json`, and the installable plugin is under `plugins/vibefoundry`. The plugin contains the local stdio MCP server, pane assets, skills, and canonical project rulebook.
+This directory contains the local Codex bridge used by the VibeFoundry Python runtime. It is intentionally thin: it launches the pane, starts the installed Python backend, and proxies pane/backend requests.
 
-The plugin does not connect to `https://vibefoundry.ai/mcp`. Its five tools run through one local MCP process:
+The public onboarding surface is the Streamable HTTP MCP at:
+
+```text
+https://vibefoundry.ai/mcp
+```
+
+That hosted MCP returns the exact install/scaffold commands. The installer installs or upgrades the `vibefoundry` Python package and finishes by running:
+
+```text
+python -m vibefoundry.setup_codex
+```
+
+That command registers this local bridge in `~/.codex/config.toml`.
+
+The local bridge exposes:
 
 - `open_vibefoundry`
 - `vf_request`
@@ -10,26 +24,19 @@ The plugin does not connect to `https://vibefoundry.ai/mcp`. Its five tools run 
 - `scaffold_project`
 - `setup_vibefoundry`
 
-`$installmcp` sets up the VibeFoundry runtime, scaffolds the current project, and opens the IDE. `$vibefoundry` opens the IDE directly.
+`$vibefoundry` opens the IDE directly. `$installmcp` remains as a compatibility workflow for Git/local installs, but the preferred public install path is the hosted MCP.
 
 ## Local testing
 
 Add this directory as a local marketplace root, install `vibefoundry@vibefoundry` in Codex, and start a new task so the skills and MCP tools are reloaded.
 
-## Distribution without a terminal
+## Public distribution
 
-The supported recipient flow is Codex plugin sharing:
-
-1. The publisher installs this local plugin in the ChatGPT desktop app.
-2. In **Plugins**, open **Created by you**, choose VibeFoundry, and select **Share**.
-3. Add workspace members or copy the generated share link.
-4. Recipients open the link or install VibeFoundry from **Shared with you** and confirm in Codex.
-
-Recipients do not run terminal commands or an OS installer to install the plugin. The optional `$installmcp` workflow may still request normal Codex approval when it installs the local Python runtime needed by the VibeFoundry backend.
+For public/official distribution, point users or marketplace review at the hosted MCP URL. It is the stable entrypoint and does not require shipping this repo's local stdio bundle as the primary marketplace artifact.
 
 ## Git marketplace distribution
 
-The `codex-plugin` branch can be registered directly as a Git-backed marketplace. Its root `.agents/plugins/marketplace.json` points to this folder's plugin payload. Use both sparse paths so Codex checks out the root manifest and the plugin:
+The `codex-plugin` branch can still be registered directly as a Git-backed marketplace for testing the local bridge. Its root `.agents/plugins/marketplace.json` points to this folder's plugin payload. Use both sparse paths so Codex checks out the root manifest and the plugin:
 
 ```text
 codex plugin marketplace add https://github.com/vibefoundry/vibefoundry-ide.git --ref codex-plugin --sparse .agents/plugins --sparse codex_plugin

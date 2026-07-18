@@ -1,17 +1,19 @@
 """
-Register the VibeFoundry pane MCP and skill with the Codex / ChatGPT desktop app.
+Register or repair the local VibeFoundry bridge for Codex / ChatGPT desktop.
 
-Adds a `[mcp_servers.vibefoundry]` stdio entry to ~/.codex/config.toml that
-points `node` at the pane MCP shipped inside this package (pane_mcp/index.js).
-Also installs a user-wide `vibefoundry` skill into ~/.agents/skills so the user
-can invoke it directly with `$vibefoundry`.
+The public onboarding MCP at https://vibefoundry.ai/mcp installs the Python
+runtime, then runs this module. From that point on, the local Python package owns
+the heavy work and this command wires Codex to the tiny stdio bridge shipped in
+``pane_mcp/index.js``.
 
-Installed as the console command `vibefoundry-setup-codex` (see pyproject.toml).
-Idempotent: re-running updates the skill and leaves existing MCP config in place.
+Installed as the console command ``vibefoundry-setup-codex`` (see pyproject.toml).
+Idempotent: re-running updates the skill and rewrites the VibeFoundry MCP block
+if the package path changed after an upgrade.
 """
 
 import os
 import shutil
+import re
 
 
 def _install_skill(pkg_dir):
@@ -46,15 +48,22 @@ def _register_mcp(pkg_dir):
         with open(cfg, "r", encoding="utf-8") as f:
             existing = f.read()
 
-    if "[mcp_servers.vibefoundry]" in existing:
-        print("VibeFoundry pane MCP is already registered in ~/.codex/config.toml.")
-        return 0
-
     block = (
         "[mcp_servers.vibefoundry]\n"
         'command = "node"\n'
         f'args = ["{node_path}"]\n'
     )
+    pattern = re.compile(
+        r"(?ms)^\[mcp_servers\.vibefoundry\]\n"
+        r"(?:^[^\[\n].*\n?)*"
+    )
+    if pattern.search(existing):
+        updated = pattern.sub(block, existing, count=1)
+        with open(cfg, "w", encoding="utf-8") as f:
+            f.write(updated if updated.endswith("\n") else updated + "\n")
+        print("Updated VibeFoundry pane MCP in ~/.codex/config.toml.")
+        return 0
+
     sep = "" if existing == "" or existing.endswith("\n") else "\n"
     with open(cfg, "a", encoding="utf-8") as f:
         f.write(sep + "\n" + block)

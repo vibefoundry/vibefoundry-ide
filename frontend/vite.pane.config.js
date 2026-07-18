@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react(), viteSingleFile()],
   base: './',
   build: {
-    outDir: '../codex-plugin/vibefoundry/server/pane',
+    outDir: '../codex_plugin/plugins/vibefoundry/server/pane',
     emptyOutDir: true,
     cssCodeSplit: false,
     assetsInlineLimit: 100000000, // inline everything, no external asset URLs

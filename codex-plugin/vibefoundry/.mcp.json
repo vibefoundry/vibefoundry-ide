@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "vibefoundry": {
-      "command": "node",
-      "args": ["./server/index.js"],
-      "cwd": "."
-    }
-  }
-}

@@ -1,7 +1,7 @@
 {
   "name": "vibefoundry",
   "version": "0.1.1",
-  "description": "Open the VibeFoundry data-science IDE, scaffold governed projects, and install the local VibeFoundry runtime from Codex.",
+  "description": "Open the VibeFoundry data-science IDE through the local bridge installed by the Python runtime.",
   "author": {
     "name": "VibeFoundry",
     "url": "https://vibefoundry.ai"
@@ -19,8 +19,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "VibeFoundry",
-    "shortDescription": "A local data-science IDE inside Codex",
-    "longDescription": "Open the VibeFoundry pane, inspect project data, scaffold governed workspaces, and set up the local VibeFoundry runtime without a hosted MCP server.",
+    "shortDescription": "Local bridge for the VibeFoundry IDE",
+    "longDescription": "Launches the VibeFoundry pane, starts the installed Python runtime, and proxies requests between Codex and the local IDE backend. Public onboarding is handled by https://vibefoundry.ai/mcp, which installs the runtime and registers this bridge.",
     "developerName": "VibeFoundry",
     "category": "Productivity",
     "capabilities": [
@@ -31,8 +31,8 @@
     "websiteURL": "https://vibefoundry.ai",
     "defaultPrompt": [
       "Open VibeFoundry for this project.",
-      "Set up VibeFoundry in this workspace.",
-      "Show me the datasets available to this project."
+      "Show me the datasets available to this project.",
+      "Set up VibeFoundry from https://vibefoundry.ai/mcp."
     ],
     "brandColor": "#0C7C86",
     "composerIcon": "./assets/icon.png",

@@ -36,7 +36,7 @@ const TOOL_META = {
   ui: { resourceUri: WIDGET_URI },
 };
 
-const SERVER_INFO = { name: "vibefoundry", version: "0.0.1" };
+const SERVER_INFO = { name: "vibefoundry", version: "0.1.0" };
 
 // Returned from initialize, so it frames the WHOLE session rather than one turn.
 // MCP has no notion of a mode: the model re-decides which tools to call every
@@ -95,6 +95,18 @@ const SESSION_INSTRUCTIONS = [
   "",
   "vf_request reaches any backend endpoint (files, previews, running scripts)",
   "when no dedicated tool fits.",
+  "",
+  "== LOCAL SETUP ==",
+  "  - The public onboarding MCP lives at https://vibefoundry.ai/mcp. It returns",
+  "    install/scaffold commands and finishes by running python -m",
+  "    vibefoundry.setup_codex.",
+  "  - After that, this local stdio bridge is the thin launcher/communicator:",
+  "    it opens the pane, starts the Python runtime, and proxies UI/backend",
+  "    requests. The Python vibefoundry package owns the IDE behavior.",
+  "  - scaffold_project creates the standard folders and copies the bundled",
+  "    canonical AGENTS.md into the current task root without using HTTP.",
+  "  - setup_vibefoundry returns the exact OS-specific runtime commands used by",
+  "    the $installmcp skill. Run only those commands and honor Codex approvals.",
 ].join("\n");
 
 // --- Backend supervision -------------------------------------------------------
@@ -107,6 +119,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { fileURLToPath } = require("url");
+const installTools = require("./install-tools");
 
 // The real VibeFoundry UI, built as one self-contained HTML by
 // `vite build --config vite.pane.config.js`. If present, we serve it as the
@@ -475,6 +488,7 @@ const WIDGET_HTML = `<!doctype html>
 // --- Tool + resource definitions ----------------------------------------------
 const TOOL = {
   name: "open_vibefoundry",
+  title: "Open VibeFoundry",
   description:
     "Open the VibeFoundry IDE as a pane inside ChatGPT. Call this tool " +
     "IMMEDIATELY and DIRECTLY (do not ask for confirmation, do not deliberate) " +
@@ -503,6 +517,12 @@ const TOOL = {
     },
     required: ["projectRoot"],
   },
+  annotations: {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+    readOnlyHint: false,
+  },
   _meta: TOOL_META,
 };
 
@@ -512,6 +532,7 @@ const TOOL = {
 // backend, unchanged.
 const PROXY_TOOL = {
   name: "vf_request",
+  title: "VibeFoundry Backend Request",
   description:
     "Internal: proxy an HTTP request to the local VibeFoundry backend. Used by " +
     "the pane UI to reach the backend past the iframe sandbox.",
@@ -524,6 +545,12 @@ const PROXY_TOOL = {
     },
     required: ["path"],
   },
+  annotations: {
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: false,
+    readOnlyHint: false,
+  },
 };
 
 // The catalogue, exposed to the model. This is the point of the whole feature:
@@ -532,6 +559,7 @@ const PROXY_TOOL = {
 // date, and what the values look like — before pulling anything.
 const CATALOG_TOOL = {
   name: "vf_catalog",
+  title: "VibeFoundry Data Catalogue",
   description:
     "List the catalogued SharePoint datasets available to this project, with a " +
     "description of each one, what a row represents, its row count, and its " +
@@ -555,6 +583,12 @@ const CATALOG_TOOL = {
           "profile instead of the summary listing.",
       },
     },
+  },
+  annotations: {
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+    readOnlyHint: true,
   },
 };
 
@@ -747,10 +781,22 @@ async function handle(msg) {
       return result(id, {});
 
     case "tools/list":
-      return result(id, { tools: [TOOL, PROXY_TOOL, CATALOG_TOOL] });
+      return result(id, {
+        tools: [TOOL, PROXY_TOOL, CATALOG_TOOL].concat(installTools.tools),
+      });
 
     case "tools/call": {
       var name = params.name;
+
+      if (name === "scaffold_project") {
+        var scaffoldArgs = params.arguments || {};
+        scaffoldArgs.projectRoot = await activeProjectRoot(scaffoldArgs.projectRoot);
+        return result(id, installTools.scaffoldProject(scaffoldArgs));
+      }
+
+      if (name === "setup_vibefoundry") {
+        return result(id, installTools.setupVibeFoundry(params.arguments || {}));
+      }
 
       if (name === PROXY_TOOL.name) {
         var proxied = await proxyRequest(params.arguments || {});

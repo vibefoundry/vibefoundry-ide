@@ -5,7 +5,9 @@ description: Set up the local VibeFoundry runtime and scaffold the current proje
 
 # Install VibeFoundry
 
-Set up VibeFoundry from inside Codex. Do not send the user to a separate terminal and do not register the hosted `https://vibefoundry.ai/mcp` endpoint; this plugin already provides the MCP server locally.
+Set up VibeFoundry from inside Codex. The preferred public install path is the hosted Streamable HTTP MCP at `https://vibefoundry.ai/mcp`: it installs the local Python runtime, then runs `python -m vibefoundry.setup_codex` to register the local pane bridge.
+
+When this local bridge plugin is already installed, you may use its compatibility setup tool directly:
 
 1. Detect the operating system. On macOS, `uname -s` returns `Darwin`. On Windows, PowerShell exposes `$env:OS` as `Windows_NT`.
 2. Call `setup_vibefoundry` with `os` set to `mac` or `windows`.

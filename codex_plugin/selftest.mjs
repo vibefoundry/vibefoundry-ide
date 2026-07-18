@@ -9,7 +9,7 @@
  * isolation both missed it. Only actually driving every method finds this class
  * of bug.
  *
- *   node codex-plugin/selftest.mjs [path/to/index.js]
+ *   node codex_plugin/selftest.mjs [path/to/index.js]
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
