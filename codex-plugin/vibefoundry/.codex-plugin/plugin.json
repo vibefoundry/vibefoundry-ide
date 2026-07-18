@@ -1,6 +1,6 @@
 {
   "name": "vibefoundry",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "VibeFoundry — a local data-science IDE, opened as a pane inside ChatGPT / Codex.\n\nAliases: @vibefoundry, @vf, vibefoundry, vibe foundry, VF, the data pane, the data-science IDE.\n\nWhen the user asks to open, launch, start or show VibeFoundry (e.g. \"@vibefoundry launch\", \"open VibeFoundry\", \"launch VF\"), call open_vibefoundry immediately — do not deliberate or ask for confirmation. Match generously through misspellings and spacing: vfoundry, videfoundry, vibe foundry, vibefoundy all mean VibeFoundry.\n\nOnce it is open, VibeFoundry is the user's working environment: their data lives in the project's input_folder/, results go to output_folder/, and code lives in app_folder/scripts/. Answer questions about their data by calling vf_catalog first — never from memory or by guessing at filenames and columns.",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",

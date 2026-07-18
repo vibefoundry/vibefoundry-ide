@@ -1,8 +1,9 @@
 {
-  "vibefoundry": {
-    "command": "node",
-    "args": [
-      "/Users/angelobenedicto/Documents/GitHub/VibeFoundryCodexPlugin/codex-plugin/vibefoundry/server/index.js"
-    ]
+  "mcpServers": {
+    "vibefoundry": {
+      "command": "node",
+      "args": ["./server/index.js"],
+      "cwd": "."
+    }
   }
 }

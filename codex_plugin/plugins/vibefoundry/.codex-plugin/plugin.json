@@ -1,6 +1,6 @@
 {
   "name": "vibefoundry",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open the VibeFoundry data-science IDE, scaffold governed projects, and install the local VibeFoundry runtime from Codex.",
   "author": {
     "name": "VibeFoundry",
