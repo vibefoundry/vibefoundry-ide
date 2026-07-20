@@ -14,6 +14,7 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
+import { applyPaneTheme } from './utils/paneTheme'
 
 // --- wait for the Apps SDK host bridge ---------------------------------------
 function awaitOpenai(timeoutMs = 8000) {
@@ -112,32 +113,10 @@ InertWebSocket.CLOSING = 2
 InertWebSocket.CLOSED = 3
 window.WebSocket = InertWebSocket
 
-// --- Match the Codex / ChatGPT neutral color scheme + system font (pane only)
-// Overrides VibeFoundry's blue-tinted theme variables. Injected after the
-// bundled CSS so it wins; only runs in the pane, so the standalone app keeps
-// its own look.
-function applyCodexTheme() {
-  const style = document.createElement('style')
-  style.textContent = `
-    :root {
-      --color-bg: #ffffff;
-      --color-bg-alt: #f9f9f9;
-      --color-bg-elevated: #ffffff;
-      --color-bg-subtle: #f0f0f0;
-      --color-border: #e5e5e5;
-      --color-border-hover: #d4d4d4;
-      --color-text: #0d0d0d;
-      --color-text-muted: #5d5d5d;
-      --color-text-subtle: #8f8f8f;
-      --color-accent: #0d0d0d;
-      --color-accent-hover: #000000;
-      --color-accent-subtle: #ececec;
-      --font-main: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
-    }
-  `
-  document.head.appendChild(style)
-}
-applyCodexTheme()
+// Match the host's neutral color scheme + system font, overriding VibeFoundry's
+// blue-tinted theme. Shared with App.jsx's embedded-mode path (see
+// utils/paneTheme.js) so Codex and the Claude preview get the identical look.
+applyPaneTheme()
 
 // --- Inline = a single launch button; the full IDE mounts only in the pane ---
 const FONT =

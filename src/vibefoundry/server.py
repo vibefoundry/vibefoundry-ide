@@ -73,7 +73,7 @@ import polars as pl
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -3275,8 +3275,16 @@ async def websocket_terminal(websocket: WebSocket):
 # Serve static files (React app)
 
 @app.get("/")
-async def serve_index():
+async def serve_index(request: Request):
     """Serve the React app index.html"""
+    # When launched with --pane (VIBEFOUNDRY_PANE=1) — i.e. embedded in the
+    # Claude Code preview, which loads the app top-level rather than in an
+    # iframe — redirect the bare root to ?pane=1 so the frontend switches to
+    # the neutral pane theme and trimmed chrome. Guarded on the param already
+    # being absent so it redirects once and never loops.
+    if os.environ.get("VIBEFOUNDRY_PANE") and request.query_params.get("pane") != "1":
+        return RedirectResponse(url="/?pane=1", status_code=307)
+
     static_dir = get_static_dir()
     index_path = static_dir / "index.html"
 

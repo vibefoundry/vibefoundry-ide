@@ -161,6 +161,12 @@ def main(args: Optional[list[str]] = None):
         help="Don't open the browser automatically"
     )
     parser.add_argument(
+        "--pane",
+        action="store_true",
+        help="Embedded-pane mode (Claude Code preview): serve the neutral pane "
+             "theme and trimmed chrome, and auto-redirect the root to ?pane=1"
+    )
+    parser.add_argument(
         "--dev",
         action="store_true",
         help="Run in development mode (enables CORS, detailed logging)"
@@ -229,6 +235,11 @@ def main(args: Optional[list[str]] = None):
     # Set environment variable for server to pick up
     os.environ["VIBEFOUNDRY_PROJECT_PATH"] = str(project_folder)
     print(f"Project folder: {project_folder}")
+
+    # Embedded-pane mode: the server redirects the root to ?pane=1 so the
+    # frontend renders the neutral pane theme + trimmed chrome.
+    if parsed_args.pane:
+        os.environ["VIBEFOUNDRY_PANE"] = "1"
 
     # Find available port
     port = parsed_args.port or find_available_port()

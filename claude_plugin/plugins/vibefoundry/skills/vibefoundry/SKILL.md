@@ -25,7 +25,7 @@ Claude Code's Preview pane launches servers defined in `<CWD>/.claude/launch.jso
     {
       "name": "vibefoundry",
       "runtimeExecutable": "vibefoundry",
-      "runtimeArgs": ["--port", "<PORT>", "--no-browser", "<CWD>"],
+      "runtimeArgs": ["--port", "<PORT>", "--no-browser", "--pane", "<CWD>"],
       "port": <PORT>
     }
   ]

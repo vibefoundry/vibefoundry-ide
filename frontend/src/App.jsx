@@ -10,6 +10,7 @@ import {
   getFileType,
   getExtension
 } from './utils/fileSystem'
+import { applyPaneTheme } from './utils/paneTheme'
 import './App.css'
 
 function App() {
@@ -79,10 +80,25 @@ function App() {
   }
 
   const isSignedIn = authStatus.signedIn
-  // True when running inside the Codex / ChatGPT desktop-app pane (window.openai
-  // is injected by the host). Used to hide IDE-only chrome that has no meaning
-  // in the pane. The standalone pip app never sets this, so it's unaffected.
-  const isPane = typeof window !== 'undefined' && !!window.openai
+  // True when running EMBEDDED in a host pane rather than as the standalone app.
+  // Three host-neutral signals, any of which flips pane mode:
+  //   - window.openai       -> Codex / ChatGPT desktop-app widget
+  //   - framed (self!=top)  -> Claude Code preview (and any iframe embed)
+  //   - ?pane=1             -> explicit override for testing / custom launches
+  // Drives both the neutral theme and hiding IDE-only chrome. The standalone pip
+  // app runs top-level with no flag, so it keeps its full look untouched.
+  const isPane = typeof window !== 'undefined' && (
+    !!window.openai ||
+    window.self !== window.top ||
+    new URLSearchParams(window.location.search).get('pane') === '1'
+  )
+
+  // Apply the neutral host-native theme whenever we're embedded. In the Codex
+  // pane build pane-main.jsx also calls this; applyPaneTheme is idempotent so
+  // the double-call is harmless. The standalone app skips it and stays blue.
+  useEffect(() => {
+    if (isPane) applyPaneTheme()
+  }, [isPane])
 
   const [tree, setTree] = useState([])
   const [selectedFile, setSelectedFile] = useState(null)
@@ -111,7 +127,9 @@ function App() {
   const showPreview = view === 'preview'
   const [previewUrl, setPreviewUrl] = useState(() => localStorage.getItem('previewUrl') || '')
   const [deletedFileToast, setDeletedFileToast] = useState(null)
-  const [showFolderPicker, setShowFolderPicker] = useState(true)
+  // Starts closed: the mount effect below auto-loads the backend's folder and
+  // only opens the picker if that folder is missing. Avoids a picker flash.
+  const [showFolderPicker, setShowFolderPicker] = useState(false)
   const [projectPath, setProjectPath] = useState(null)
   const [scriptRunnerHeight, setScriptRunnerHeight] = useState(null)
   const [isResizingScriptRunner, setIsResizingScriptRunner] = useState(false)
@@ -502,22 +520,26 @@ function App() {
     }
   }
 
-  // Pane mode (Codex / ChatGPT desktop app): the backend is already launched
-  // with a project folder, so skip the picker and load that folder directly.
-  // Gated on window.openai so the standalone app keeps its normal picker.
+  // The backend is always launched with a project folder (the CLI defaults to
+  // cwd), so on mount we ask it what that folder is and load it directly —
+  // no manual picker step. This runs in EVERY host (Codex pane, Claude preview,
+  // standalone), trusting the folder the backend was started in. Only if the
+  // backend somehow reports no folder do we fall back to the manual picker.
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.openai) return
     let cancelled = false
     ;(async () => {
       try {
         const res = await fetch('/api/folder/info')
-        if (!res.ok) return
+        if (!res.ok) { if (!cancelled) setShowFolderPicker(true); return }
         const info = await res.json()
-        if (!cancelled && info.project_folder) {
+        if (cancelled) return
+        if (info.project_folder) {
           handleFolderSelected(info.project_folder)
+        } else {
+          setShowFolderPicker(true)
         }
       } catch (e) {
-        /* leave the picker as a fallback */
+        if (!cancelled) setShowFolderPicker(true)
       }
     })()
     return () => { cancelled = true }
