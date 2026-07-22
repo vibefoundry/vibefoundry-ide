@@ -1,6 +1,6 @@
 {
   "name": "vibefoundry",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Open the VibeFoundry data-science IDE as an in-app pane in Claude Code and work through it (data catalogue, templates, scripts) via the local Python runtime.",
   "author": {
     "name": "VibeFoundry",
