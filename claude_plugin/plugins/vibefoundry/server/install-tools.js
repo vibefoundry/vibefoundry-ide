@@ -41,7 +41,8 @@ const SETUP_TOOL = {
     "Return the exact OS-specific commands for installing the local " +
     "VibeFoundry runtime and vibe-coding toolchain, then registering the local " +
     "pane bridge with python -m vibefoundry.setup_codex. Detect the operating " +
-    "system first, then run only the returned commands inside Codex.",
+    "system first, then run only the returned commands in this session. The " +
+    "commands are in the text reply AND in structuredContent.commands.",
   annotations: {
     destructiveHint: false,
     idempotentHint: true,
@@ -112,7 +113,7 @@ function scaffoldProject(args) {
 }
 
 const SETUP_GUARDRAIL = [
-  "Run only the commands below, in order, from inside Codex.",
+  "Run only the commands below, in order, from inside this session.",
   "Do not install an editor, Homebrew, or unrelated packages.",
   "The Python runtime owns the VibeFoundry implementation; the MCP bridge only launches it.",
   "If a command fails, diagnose or retry that command only.",
@@ -162,7 +163,7 @@ function buildSetupInstructions(os) {
     "",
     commands,
     "",
-    "When all five steps succeed, restart the Codex desktop app if needed, scaffold the current task root, and open VibeFoundry.",
+    "When all five steps succeed, restart the desktop app if needed, scaffold the current task root, and open VibeFoundry.",
   ].join("\n");
 }
 
@@ -174,7 +175,14 @@ function setupVibeFoundry(args) {
   var instructions = buildSetupInstructions(os);
   return {
     content: [{ type: "text", text: instructions }],
-    structuredContent: { status: "commands_ready", os: os },
+    // Ship the commands in structuredContent too: some clients surface only the
+    // structured payload, and a bare {status} read as "no commands returned".
+    structuredContent: {
+      status: "commands_ready",
+      os: os,
+      guardrail: SETUP_GUARDRAIL,
+      commands: os === "windows" ? WINDOWS_SETUP : MAC_SETUP,
+    },
   };
 }
 

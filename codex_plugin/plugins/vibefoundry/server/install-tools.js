@@ -174,7 +174,14 @@ function setupVibeFoundry(args) {
   var instructions = buildSetupInstructions(os);
   return {
     content: [{ type: "text", text: instructions }],
-    structuredContent: { status: "commands_ready", os: os },
+    // Ship the commands in structuredContent too: some clients surface only the
+    // structured payload, and a bare {status} read as "no commands returned".
+    structuredContent: {
+      status: "commands_ready",
+      os: os,
+      guardrail: SETUP_GUARDRAIL,
+      commands: os === "windows" ? WINDOWS_SETUP : MAC_SETUP,
+    },
   };
 }
 
