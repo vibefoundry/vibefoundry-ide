@@ -28,4 +28,15 @@ export function applyPaneTheme() {
     }
   `
   document.head.appendChild(style)
+
+  // Windows display scaling (125%/150%) gets applied twice in embedded panes:
+  // the host window is already scaled, then the pane webview scales again by
+  // devicePixelRatio — so the IDE renders ~2x the host chrome. Counter-zoom by
+  // 1/dpr, Windows only: macOS retina reports dpr 2 but renders at the correct
+  // logical size, so it must not be touched.
+  const isWindows = /Windows/i.test(navigator.userAgent || '')
+  const dpr = window.devicePixelRatio || 1
+  if (isWindows && dpr > 1) {
+    document.documentElement.style.zoom = String(1 / dpr)
+  }
 }
