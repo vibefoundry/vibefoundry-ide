@@ -299,15 +299,27 @@ function backendHealth(timeoutMs) {
 
 // Resolve the Python interpreter that OWNS this package so we can run
 // `python -m vibefoundry` directly — no PATH guessing, works on any OS.
-// pane_mcp/index.js lives at <env>/.../site-packages/vibefoundry/pane_mcp/.
+// Two layouts to cover:
+//  - pip pane_mcp: index.js lives at <env>/.../site-packages/vibefoundry/pane_mcp/,
+//    so python sits a fixed number of dirs up (the relative candidates).
+//  - Claude plugin cache: index.js lives under ~/.claude/plugins/..., nowhere near
+//    a python env — but $installmcp always installs into ~/miniconda3, so probe
+//    that fixed location directly. Critical on Windows, where the shell fallback
+//    runs cmd.exe /c with the app's inherited PATH (no login shell, so a
+//    post-launch conda install is invisible and `vibefoundry` never resolves).
 function resolveBundledPython() {
   var candidates =
     process.platform === "win32"
-      ? [path.join(__dirname, "..", "..", "..", "..", "python.exe")] // <env>\Lib\site-packages\vibefoundry\pane_mcp -> <env>\python.exe
+      ? [
+          path.join(__dirname, "..", "..", "..", "..", "python.exe"), // <env>\Lib\site-packages\vibefoundry\pane_mcp -> <env>\python.exe
+          path.join(process.env.USERPROFILE || "", "miniconda3", "python.exe"),
+        ]
       : [
           path.join(__dirname, "..", "..", "..", "..", "..", "bin", "python3"),
-          path.join(__dirname, "..", "..", "..", "..", "..", "bin", "python"),
-        ]; // <env>/lib/pythonX/site-packages/vibefoundry/pane_mcp -> <env>/bin/python
+          path.join(__dirname, "..", "..", "..", "..", "..", "bin", "python"), // <env>/lib/pythonX/site-packages/vibefoundry/pane_mcp -> <env>/bin/python
+          path.join(process.env.HOME || "", "miniconda3", "bin", "python3"),
+          path.join(process.env.HOME || "", "miniconda3", "bin", "python"),
+        ];
   for (var i = 0; i < candidates.length; i++) {
     try { if (fs.existsSync(candidates[i])) return candidates[i]; } catch (e) {}
   }
