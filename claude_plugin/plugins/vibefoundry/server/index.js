@@ -143,7 +143,7 @@ function backendCmd() {
   if (process.env.VF_BACKEND_CMD) {
     return process.env.VF_BACKEND_CMD.replace(/\{port\}/g, backendPort());
   }
-  return "vibefoundry --port " + backendPort() + " --no-browser";
+  return "vibefoundry --port " + backendPort() + " --no-browser --pane";
 }
 
 // --- Session port ---------------------------------------------------------------
@@ -191,6 +191,56 @@ function samePath(a, b) {
     catch (e) { return String(s).replace(/\/+$/, ""); }  // may not exist yet
   };
   return real(a) === real(b);
+}
+
+// Claude Code's Preview pane launches servers from <projectRoot>/.claude/launch.json.
+// That file is SHARED by every conversation working in this project, and preview_start
+// reuses/stops servers by config NAME across conversations — so a single shared
+// "vibefoundry" entry lets one conversation's launch clobber another's port or knock
+// out its pane. We instead write a config named uniquely per backend port
+// ("vibefoundry-<port>"), preserving every other entry. Doing this in code — rather than
+// leaving the model to compute the port and rewrite the file from a skill — is what makes
+// the launch deterministic: the port and name are always right, and the pane always
+// mounts the backend we just started. Returns the config name for the model to hand to
+// preview_start, or null if the file could not be written.
+async function writeLaunchConfig(projectRoot, port) {
+  if (!projectRoot || !port) return null;
+  var name = "vibefoundry-" + port;
+  var dir = path.join(projectRoot, ".claude");
+  var file = path.join(dir, "launch.json");
+
+  var doc = { version: "0.0.1", configurations: [] };
+  try {
+    var parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (parsed && Array.isArray(parsed.configurations)) doc = parsed;
+  } catch (e) { /* missing or unparseable — start fresh */ }
+  if (!Array.isArray(doc.configurations)) doc.configurations = [];
+
+  // Preserve non-vibefoundry configs untouched. Among our own family (vibefoundry-*),
+  // drop this port's old entry (re-added below) and any whose port no longer answers;
+  // keep other conversations' LIVE panes so we never knock one offline.
+  var kept = [];
+  for (var i = 0; i < doc.configurations.length; i++) {
+    var c = doc.configurations[i];
+    var isVf = c && typeof c.name === "string" && /^vibefoundry-\d+$/.test(c.name);
+    if (!isVf) { kept.push(c); continue; }
+    if (c.name === name) continue;                 // ours — replaced below
+    if (await portIsOpen(c.port)) kept.push(c);    // another conversation's — keep iff live
+  }
+
+  kept.push({
+    name: name,
+    runtimeExecutable: "vibefoundry",
+    runtimeArgs: ["--port", String(port), "--no-browser", "--pane", projectRoot],
+    port: port,
+  });
+  doc.configurations = kept;
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
+  } catch (e) { return null; }
+  return name;
 }
 
 let backendChild = null;
@@ -279,7 +329,10 @@ async function startFreshBackend(project) {
     var py = resolveBundledPython();
     if (py) {
       // Preferred: run the exact interpreter that has vibefoundry installed.
-      var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser", project];
+      // --pane => VIBEFOUNDRY_PANE=1: the backend redirects "/" to "/?pane=1" so
+      // Claude's Preview iframe gets the neutral, trimmed in-app UI, not the
+      // full standalone chrome. Must match writeLaunchConfig's runtimeArgs.
+      var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser", "--pane", project];
       backendChild = spawn(py, args, opts);
     } else {
       // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
@@ -848,6 +901,11 @@ async function handle(msg) {
         folder = info && info.project_folder;
       } catch (e) { /* backend may still be waking */ }
 
+      // Deterministically register this backend with Claude Code's Preview pane,
+      // uniquely named per port so concurrent conversations don't collide. The model
+      // just passes previewConfigName to preview_start — no port math on its side.
+      var previewConfigName = await writeLaunchConfig(project, SESSION_PORT);
+
       var catalogued = 0;
       try {
         var cat = await (await fetch(BACKEND + "/api/catalog")).json();
@@ -935,6 +993,7 @@ async function handle(msg) {
           project: project,
           projectFolder: folder,
           cataloguedDatasets: catalogued,
+          previewConfigName: previewConfigName,
         },
         _meta: TOOL_META,
       });

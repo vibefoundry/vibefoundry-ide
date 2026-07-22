@@ -13,29 +13,19 @@ The goal: end with the VibeFoundry IDE rendered inside Claude Code's **Preview p
 
 ## Launch sequence
 
-**1. Start the backend.**
-Call `open_vibefoundry` with `projectRoot` set to the **absolute path of the current working directory** — the folder the user is working in this session. Get this from the session/task context automatically; never ask the user to type or select it, and never infer it from the MCP server process's own working directory. From the result's `structuredContent`, read `backendUrl` (e.g. `http://127.0.0.1:<port>`). Call the value `<URL>`, its port `<PORT>`, and the working directory `<CWD>`. The backend uses a **dynamic port**, so always take `<PORT>` from `<URL>` — do not hardcode it.
+The heavy lifting is done in code by `open_vibefoundry`: it starts the backend on a fresh port **and** deterministically writes a uniquely-named, per-conversation config into `<CWD>/.claude/launch.json` (`vibefoundry-<port>`), preserving every other entry and pruning only its own dead ports. So you never compute a port, name a config, or edit `launch.json` yourself — just call the tool and use what it returns.
 
-**2. Ensure a Preview launch config exists.**
-Claude Code's Preview pane launches servers defined in `<CWD>/.claude/launch.json`. Write (or update) that file so it contains a configuration named `vibefoundry` on `<PORT>`, preserving any existing configurations:
-```json
-{
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "vibefoundry",
-      "runtimeExecutable": "vibefoundry",
-      "runtimeArgs": ["--port", "<PORT>", "--no-browser", "--pane", "<CWD>"],
-      "port": <PORT>
-    }
-  ]
-}
-```
+**1. Start the backend + register the pane config.**
+Call `open_vibefoundry` with `projectRoot` set to the **absolute path of the current working directory** — the folder the user is working in this session. Get this from session/task context automatically; never ask the user to type or select it, and never infer it from the MCP server process's own working directory. From the result's `structuredContent`, read two values:
+- `backendUrl` (e.g. `http://127.0.0.1:<port>`) — call it `<URL>`; hand it to the user at the end.
+- `previewConfigName` (e.g. `vibefoundry-64783`) — the launch config the tool just wrote. Use it verbatim in the next step; do not construct or guess it.
 
-**3. Open the Preview pane.**
-Call `preview_start` with `name: "vibefoundry"`. It reuses the backend already running on `<PORT>` and opens the internal Preview pane. Then take a `preview_screenshot` (or `preview_snapshot`) with the returned `serverId` to check the state.
+**2. Open the Preview pane — only ever touch YOUR OWN config.**
+Call `preview_start` with `name: previewConfigName`. Because that name is unique to the backend just started, it mounts the pane on exactly this session's backend — not a stale one from another conversation. Then `preview_screenshot` (or `preview_snapshot`) with the returned `serverId` to check state.
 
-**4. Open the project in the pane (only if the folder picker is showing).**
+**Never** `preview_stop` a `vibefoundry-*` server you did not start this turn: `preview_list` only shows *this* conversation's servers, so you cannot see another conversation's pane and must not assume you can safely stop it. For a clean restart, stop/start **only** `previewConfigName`.
+
+**3. Open the project in the pane (only if the folder picker is showing).**
 If the UI shows the "Select Project Folder" picker instead of the file tree:
 - Fill the path box with `<CWD>` using `preview_fill` on selector `input[type="text"]`.
 - Click **Go**, then **Select This Folder**, using `preview_eval`:
@@ -43,38 +33,12 @@ If the UI shows the "Select Project Folder" picker instead of the file tree:
   - then `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Select This Folder').click()`
 - Screenshot to confirm the project's file tree is now showing.
 
-**5. Confirm.** Tell the user VibeFoundry is open in the Preview pane on their project, and include `<URL>` in case they also want to open it in a full browser.
+**4. Confirm.** Tell the user VibeFoundry is open in the Preview pane on their project, and include `<URL>` in case they also want a full browser tab.
 
-**Fallback:** if the Preview tools are unavailable (e.g. terminal Claude Code with no Preview panel), skip steps 2–4 and just give the user `<URL>` to open in a browser or paste into the app's built-in "Enter a URL" pane.
+**Fallback:** if the Preview tools are unavailable (e.g. terminal Claude Code with no Preview panel), skip steps 2–3 and just give the user `<URL>` to open in a browser or paste into the app's built-in "Enter a URL" pane.
 
 ## After it's open — work through VibeFoundry
 
-Once VibeFoundry is open, treat it as the user's working environment for the rest of the conversation. Their data and code live in the project folder, and this server is how you reach both. `vf_request` reaches any backend endpoint (files, previews, running scripts) when no dedicated tool fits.
+Once VibeFoundry is open, treat it as the user's working environment for the rest of the conversation: their data and code live in the project folder, and this server is how you reach both. `vf_request` reaches any backend endpoint (files, previews, running scripts) when no dedicated tool fits.
 
-### Data questions: local first, then the catalogue
-
-**1. Look in the project's own data first.** Read `app_folder/meta_data/input_metadata.txt` via `vf_request` — a generated digest of every file in `input_folder/` with columns, row counts and date columns. List `input_folder/` with `/api/files/tree`. If the answer is there, use it; the data is already local and needs no pulling.
-
-**2. If `input_folder/` can't answer it, assume the answer is in the Data Catalogue.** That means: no such dataset locally, missing columns, wrong time period, or the digest says *"No data files found"*. Call **`vf_catalog`** to search the connected SharePoint library — it returns each dataset's description, what one row represents (the grain), row counts, and column profiles. Use `dataset: "<name>"` for one dataset's full column profile.
-
-**3. Pull before analysing.** Once you've picked a dataset:
-
-```
-vf_request POST /api/sharepoint/download
-  { serverRelativeUrl: "<catalogue folder>/<path>", destFolder: "input_folder" }
-```
-
-**Never invent** filenames, columns or values at any step, and never answer from memory. If neither local data nor the catalogue can answer, say so and point the user at the Data Catalogue tab.
-
-### Building an app: AGENTS.md, and never from scratch
-
-- **Read the project's `AGENTS.md` first and follow it exactly** — the track choice, folder structure, `run_app.sh`/`.bat`, and "input is sacred". Never stray from it or invent your own structure.
-- **Always look for an existing template first.** List the project's `templates/` folder (`vf_request /api/files/tree`). If one fits, start from it.
-- **If `templates/` has nothing suitable, pull one from the VibeFoundry template library** rather than starting from scratch:
-
-```
-vf_request GET  /api/templates/catalog          # what's available
-vf_request POST /api/templates/download {id}    # lands in templates/
-```
-
-- Only write an app from scratch if the library genuinely has nothing close.
+The full working rules — **data questions go local-first (`input_folder/` digest) then the Data Catalogue (`vf_catalog`, pull before analysing), never invent values; building apps follows the project's `AGENTS.md` and starts from a template, never from scratch** — are delivered at runtime in two places that stay in sync with the server: the MCP server's `initialize` instructions, and the live brief `open_vibefoundry` returns (which reports this project's actual `input_folder`/`templates`/`AGENTS.md` state). Follow those; they supersede any static copy here.

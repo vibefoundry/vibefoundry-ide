@@ -143,7 +143,7 @@ function backendCmd() {
   if (process.env.VF_BACKEND_CMD) {
     return process.env.VF_BACKEND_CMD.replace(/\{port\}/g, backendPort());
   }
-  return "vibefoundry --port " + backendPort() + " --no-browser";
+  return "vibefoundry --port " + backendPort() + " --no-browser --pane";
 }
 
 // --- Session port ---------------------------------------------------------------
@@ -279,7 +279,10 @@ async function startFreshBackend(project) {
     var py = resolveBundledPython();
     if (py) {
       // Preferred: run the exact interpreter that has vibefoundry installed.
-      var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser", project];
+      // --pane => VIBEFOUNDRY_PANE=1: the backend redirects "/" to "/?pane=1" so
+      // an embedded iframe gets the neutral, trimmed in-app UI, not the full
+      // standalone chrome. Must match writeLaunchConfig's runtimeArgs.
+      var args = ["-m", "vibefoundry", "--port", String(port), "--no-browser", "--pane", project];
       backendChild = spawn(py, args, opts);
     } else {
       // Fallback: run VF_BACKEND_CMD through the platform's shell (NOT /bin/zsh on Windows).
