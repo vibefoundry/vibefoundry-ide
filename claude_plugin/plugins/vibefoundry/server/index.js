@@ -228,10 +228,15 @@ async function writeLaunchConfig(projectRoot, port) {
     if (await portIsOpen(c.port)) kept.push(c);    // another conversation's — keep iff live
   }
 
+  // Attach-only config: url + no command. The pane must never spawn the backend
+  // itself — this MCP server already started it (with --pane) and owns its
+  // lifecycle. A runtimeExecutable here would make the pane launch "vibefoundry"
+  // from ITS OWN PATH, which fails on Windows (the app's inherited PATH predates
+  // a conda install; no login shell) and then the pane refuses to attach to the
+  // "unrecognized" process holding the port.
   kept.push({
     name: name,
-    runtimeExecutable: "vibefoundry",
-    runtimeArgs: ["--port", String(port), "--no-browser", "--pane", projectRoot],
+    url: "http://localhost:" + port,
     port: port,
   });
   doc.configurations = kept;
